@@ -25,3 +25,4 @@ cover.out
 
 # Local env
 .env
+.local/
