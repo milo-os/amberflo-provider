@@ -101,4 +101,4 @@ require (
 // go.miloapis.com/billing is not yet published to the Go module proxy at its
 // vanity import path. Pin to a specific commit on github.com/datum-cloud/billing
 // until a tagged release is available.
-replace go.miloapis.com/billing => github.com/datum-cloud/billing v0.0.0-20260414205450-c8d2c399ec2c
+replace go.miloapis.com/billing => github.com/datum-cloud/billing v0.0.0-20260415200346-9d769ef4af18

@@ -11,8 +11,8 @@ github.com/cenkalti/backoff/v4 v4.3.0/go.mod h1:Y3VNntkOUPxTVeUxJ/G5vcM//AlwfmyY
 github.com/cespare/xxhash/v2 v2.3.0 h1:UL815xU9SqsFlibzuggzjXhog7bL6oX9BbNZnL2UFvs=
 github.com/cespare/xxhash/v2 v2.3.0/go.mod h1:VGX0DQ3Q6kWi7AoAeZDth3/j3BFtOZR5XLFGgcrjCOs=
 github.com/cpuguy83/go-md2man/v2 v2.0.6/go.mod h1:oOW0eioCTA6cOiMLiUPZOpcVxMig6NIQQ7OS05n1F4g=
-github.com/datum-cloud/billing v0.0.0-20260414205450-c8d2c399ec2c h1:Z2M9k65m94dwaxk7fQGvwZSDlaFL0eRO0T/c4Q9d7gQ=
-github.com/datum-cloud/billing v0.0.0-20260414205450-c8d2c399ec2c/go.mod h1:vr+XvRr3ET1Tm8lMGE6YDqitlYcJlCIEfO1mIB3v0Hg=
+github.com/datum-cloud/billing v0.0.0-20260415200346-9d769ef4af18 h1:c0RcHoOCz/NjVxpF6O02PMyyyTRXeb+9Oyvt4UrNVzY=
+github.com/datum-cloud/billing v0.0.0-20260415200346-9d769ef4af18/go.mod h1:vr+XvRr3ET1Tm8lMGE6YDqitlYcJlCIEfO1mIB3v0Hg=
 github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc h1:U9qPSI2PIWSS1VwoXQT9A3Wy9MM3WgvqSxFWenqJduM=
