@@ -53,6 +53,7 @@ func newMeterDefinition(nameSuffix string) *billingv1alpha1.MeterDefinition {
 				ConsumedUnit: "s",
 				PricingUnit:  "h",
 			},
+			MonitoredResourceTypes: []string{"compute.miloapis.com/Instance"},
 		},
 	}
 }
