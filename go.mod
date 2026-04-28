@@ -1,4 +1,4 @@
-module go.datum.net/amberflo-provider
+module go.miloapis.com/amberflo-provider
 
 go 1.25.7
 
@@ -99,6 +99,6 @@ require (
 )
 
 // go.miloapis.com/billing is not yet published to the Go module proxy at its
-// vanity import path. Pin to a specific commit on github.com/datum-cloud/billing
+// vanity import path. Pin to a specific commit on github.com/milo-os/billing
 // until a tagged release is available.
-replace go.miloapis.com/billing => github.com/datum-cloud/billing v0.0.0-20260416220423-385a1b369d72
+replace go.miloapis.com/billing => github.com/milo-os/billing v0.0.0-20260416220423-385a1b369d72

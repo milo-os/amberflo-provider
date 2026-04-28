@@ -1,6 +1,6 @@
 # Shim RBAC for the billing controller-manager.
 #
-# Billing's published `overlays/dev` bundle (ghcr.io/datum-cloud/billing-kustomize)
+# Billing's published `overlays/dev` bundle (ghcr.io/milo-os/billing-kustomize)
 # omits the ClusterRole/ClusterRoleBinding its controllers need for
 # watching billing resources across the cluster. Without this, the
 # billing webhooks fail on DELETE (they list bindings to enforce

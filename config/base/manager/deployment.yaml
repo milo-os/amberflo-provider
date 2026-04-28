@@ -38,7 +38,7 @@ spec:
             - --leader-elect-namespace=kube-system
             - --health-probe-bind-address=:8081
             - --server-config=/config/config.yaml
-          image: ghcr.io/datum-cloud/amberflo-provider:dev
+          image: ghcr.io/milo-os/amberflo-provider:dev
           name: manager
           ports:
             - containerPort: 8080

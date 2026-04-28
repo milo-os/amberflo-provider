@@ -10,7 +10,7 @@ resources:
 # workflow patches on release to pin the bundle against a specific container
 # image digest.
 images:
-  - name: ghcr.io/datum-cloud/amberflo-provider
+  - name: ghcr.io/milo-os/amberflo-provider
     newTag: latest
 
 configMapGenerator:

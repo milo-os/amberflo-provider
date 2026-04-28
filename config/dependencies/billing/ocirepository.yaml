@@ -5,7 +5,7 @@ metadata:
   namespace: flux-system
 spec:
   interval: 5m
-  url: oci://ghcr.io/datum-cloud/billing-kustomize
+  url: oci://ghcr.io/milo-os/billing-kustomize
   # Billing has no semver tags yet. The publish workflow emits
   # `v0.0.0-<branch>` tags for each merge. We pin to the feat/05
   # branch tag, which adds the MeterDefinition CRD on top of the
