@@ -6,7 +6,7 @@ vars:
   TOOL_DIR: "{{.USER_WORKING_DIR}}/bin"
   TEST_INFRA_REPO_REF: 'v0.6.4'
   TEST_INFRA_CLUSTER_NAME: 'test-infra'
-  IMG_NAME: 'ghcr.io/datum-cloud/amberflo-provider'
+  IMG_NAME: 'ghcr.io/milo-os/amberflo-provider'
   IMG_TAG: 'dev'
   IMG: '{{.IMG_NAME}}:{{.IMG_TAG}}'
   CONTROLLER_TOOLS_VERSION: 'v0.16.4'
@@ -14,7 +14,7 @@ vars:
   GOLANGCI_LINT_VERSION: 'v2.11.4'
 
 includes:
-  # Remote taskfile from datum-cloud/test-infra. Requires
+  # Remote taskfile from datum-cloud/test-infra (milo-os/test-infra does not exist yet). Requires
   # TASK_X_REMOTE_TASKFILES=1 in the environment. The pin lives in
   # TEST_INFRA_REPO_REF and is bumped deliberately alongside sibling
   # provider repos.

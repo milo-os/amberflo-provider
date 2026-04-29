@@ -35,9 +35,9 @@ import (
 
 	billingv1alpha1 "go.miloapis.com/billing/api/v1alpha1"
 
-	"go.datum.net/amberflo-provider/internal/amberflo"
-	"go.datum.net/amberflo-provider/internal/config"
-	"go.datum.net/amberflo-provider/internal/controller"
+	"go.miloapis.com/amberflo-provider/internal/amberflo"
+	"go.miloapis.com/amberflo-provider/internal/config"
+	"go.miloapis.com/amberflo-provider/internal/controller"
 	// +kubebuilder:scaffold:imports
 )
 

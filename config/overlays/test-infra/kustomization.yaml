@@ -22,7 +22,7 @@ components:
   - ../../components/amberflo-credentials
 
 images:
-  - name: ghcr.io/datum-cloud/amberflo-provider
+  - name: ghcr.io/milo-os/amberflo-provider
     newTag: dev
 
 generatorOptions:

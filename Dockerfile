@@ -9,7 +9,7 @@ ARG BUILD_DATE=unknown
 
 WORKDIR /workspace
 # Copy the Go Modules manifests. The replace directive in go.mod now
-# points at github.com/datum-cloud/billing at a pinned commit, so the
+# points at github.com/milo-os/billing at a pinned commit, so the
 # build context is the repo root (no sibling checkout required).
 COPY go.mod go.mod
 COPY go.sum go.sum
