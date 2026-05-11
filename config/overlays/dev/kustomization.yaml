@@ -23,15 +23,3 @@ patches:
       kind: Deployment
       name: amberflo-provider
     path: deployment_patch.yaml
-  # We use JSON patches for volume removal because Strategic Merge Patches
-  # can sometimes clear the entire volumeMounts list instead of just deleting
-  # the targeted item. These surgical removals ensure the nats-certs (index 1)
-  # are removed while keeping the critical /config and webhook certs (if any).
-  - target:
-      kind: Deployment
-      name: amberflo-provider
-    patch: |-
-      - op: remove
-        path: /spec/template/spec/containers/0/volumeMounts/1
-      - op: remove
-        path: /spec/template/spec/volumes/1
