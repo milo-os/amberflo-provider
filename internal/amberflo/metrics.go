@@ -127,6 +127,14 @@ func (ic *InstrumentedClient) GetMeter(ctx context.Context, meterAPIName string)
 	return out, err
 }
 
+// SubmitUsage forwards to the wrapped client while recording metrics.
+func (ic *InstrumentedClient) SubmitUsage(ctx context.Context, record UsageRecord) error {
+	start := time.Now()
+	err := ic.Client.SubmitUsage(ctx, record)
+	recordOp("SubmitUsage", start, err)
+	return err
+}
+
 // recordOp records a single outbound Amberflo call. status captures the
 // classified outcome (success, transient, permanent) in lieu of a raw
 // HTTP status — the Client does not expose per-request status codes at

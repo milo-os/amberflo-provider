@@ -33,11 +33,14 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
+	natsgo "github.com/nats-io/nats.go"
+
 	billingv1alpha1 "go.miloapis.com/billing/api/v1alpha1"
 
 	"go.miloapis.com/amberflo-provider/internal/amberflo"
 	"go.miloapis.com/amberflo-provider/internal/config"
 	"go.miloapis.com/amberflo-provider/internal/controller"
+	"go.miloapis.com/amberflo-provider/internal/controller/submission"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -219,6 +222,43 @@ func main() {
 		os.Exit(1)
 	}
 
+	if serverConfig.NATSConfig != nil {
+		nc, natsErr := connectNATS(serverConfig.NATSConfig)
+		if natsErr != nil {
+			setupLog.Error(natsErr, "unable to connect to NATS",
+				"url", serverConfig.NATSConfig.URL)
+			os.Exit(1)
+		}
+		defer nc.Drain() //nolint:errcheck
+
+		baCache, cacheErr := submission.NewBillingAccountCache(ctx, mgr.GetCache())
+		if cacheErr != nil {
+			setupLog.Error(cacheErr, "unable to create BillingAccountCache")
+			os.Exit(1)
+		}
+
+		meterCache, cacheErr := submission.NewMeterDefinitionCache(ctx, mgr.GetCache())
+		if cacheErr != nil {
+			setupLog.Error(cacheErr, "unable to create MeterDefinitionCache")
+			os.Exit(1)
+		}
+
+		submissionConsumer := &submission.SubmissionConsumer{
+			Cache:               mgr.GetCache(),
+			NC:                  nc,
+			IngestClient:        amberfloClient,
+			BillingAccountCache: baCache,
+			MeterCache:          meterCache,
+			Logger:              ctrl.Log.WithName("submission-consumer"),
+			FetchBatch:          1,
+		}
+		if addErr := mgr.Add(submissionConsumer); addErr != nil {
+			setupLog.Error(addErr, "unable to add submission consumer to manager")
+			os.Exit(1)
+		}
+		setupLog.Info("submission consumer registered", "natsURL", serverConfig.NATSConfig.URL)
+	}
+
 	// +kubebuilder:scaffold:builder
 
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
@@ -235,6 +275,17 @@ func main() {
 		setupLog.Error(err, "unable to start manager")
 		os.Exit(1)
 	}
+}
+
+// connectNATS establishes a NATS connection from NATSConfig. When
+// CredentialsPath is set, the NKey/JWT credentials file is used;
+// otherwise the connection is anonymous (local dev only).
+func connectNATS(cfg *config.NATSConfig) (*natsgo.Conn, error) {
+	opts := []natsgo.Option{natsgo.Name("amberflo-provider")}
+	if cfg.CredentialsPath != "" {
+		opts = append(opts, natsgo.UserCredentials(cfg.CredentialsPath))
+	}
+	return natsgo.Connect(cfg.URL, opts...)
 }
 
 // loadAPIKey resolves the Amberflo API key using the documented

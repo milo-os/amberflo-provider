@@ -29,3 +29,5 @@ cover.out
 
 # Ephemeral clones / scratch for research and investigation
 tmp/
+
+.claude/

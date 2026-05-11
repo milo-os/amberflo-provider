@@ -84,6 +84,11 @@ type AmberfloProvider struct {
 	// invoices can still be retrieved. Enable only in non-production
 	// environments where data loss is acceptable.
 	AllowCustomerDelete bool `json:"allowCustomerDelete,omitempty"`
+
+	// NATSConfig configures the NATS JetStream connection for the
+	// submission consumer. When nil, the consumer is not registered and
+	// the binary runs in its existing mode without any NATS dependency.
+	NATSConfig *NATSConfig `json:"natsConfig,omitempty"`
 }
 
 // RestConfig returns the *rest.Config used to connect to the control
@@ -262,6 +267,28 @@ func SetDefaults_TLSConfig(obj *TLSConfig) {
 	if len(obj.KeyName) == 0 {
 		obj.KeyName = "tls.key"
 	}
+}
+
+// +k8s:deepcopy-gen=true
+
+// NATSConfig configures the NATS connection for the submission consumer.
+type NATSConfig struct {
+	// URL is the NATS server URL, e.g. nats://nats:4222.
+	URL string `json:"url"`
+
+	// CAFile is the path to the NATS CA certificate file.
+	CAFile string `json:"caFile,omitempty"`
+
+	// CertFile is the path to the NATS client certificate file.
+	CertFile string `json:"certFile,omitempty"`
+
+	// KeyFile is the path to the NATS client private key file.
+	KeyFile string `json:"keyFile,omitempty"`
+
+	// CredentialsPath is the filesystem path to the NATS credentials
+	// file (NKey or JWT credentials). When empty, no credentials are
+	// used (anonymous, for local development).
+	CredentialsPath string `json:"credentialsPath,omitempty"`
 }
 
 func init() {

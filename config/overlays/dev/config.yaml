@@ -1,13 +1,10 @@
-# Dev overlay patches for the amberflo-provider Deployment. For M0 the
-# overlay is intentionally minimal; real dev wiring (kind-loaded image,
-# in-cluster fake Amberflo endpoint) lands with M4.
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: amberflo-provider
-spec:
-  template:
-    spec:
-      containers:
-        - name: manager
-          imagePullPolicy: IfNotPresent
+apiVersion: config.amberflo.providers.datum.net/v1alpha1
+kind: AmberfloProvider
+metricsServer:
+  bindAddress: "0"
+amberfloBaseURL: https://app.amberflo.io
+amberfloAPIKeyPath: /var/run/secrets/amberflo/api-key
+amberfloRateLimitPerSec: 10
+allowCustomerDelete: false
+natsConfig:
+  url: nats://nats.nats-system.svc:4222

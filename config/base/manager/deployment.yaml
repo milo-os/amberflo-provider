@@ -71,9 +71,22 @@ spec:
           volumeMounts:
             - name: config
               mountPath: /config
+            - name: nats-certs
+              mountPath: /etc/nats-certs
+              readOnly: true
       serviceAccountName: amberflo-provider
       terminationGracePeriodSeconds: 10
       volumes:
         - name: config
           configMap:
             name: amberflo-provider-config
+        - name: nats-certs
+          csi:
+            driver: csi.cert-manager.io
+            readOnly: true
+            volumeAttributes:
+              csi.cert-manager.io/issuer-name: nats
+              csi.cert-manager.io/issuer-kind: ClusterIssuer
+              csi.cert-manager.io/common-name: amberflo-provider.nats.client
+              csi.cert-manager.io/subject-organizations: datum
+              csi.cert-manager.io/fs-group: "65532"
