@@ -52,14 +52,7 @@ type wireUsageRecord struct {
 
 // SubmitUsage posts a single usage record to the Amberflo ingest API.
 func (c *client) SubmitUsage(ctx context.Context, record UsageRecord) error {
-	w := wireUsageRecord{
-		CustomerID:    record.CustomerID,
-		MeterAPIName:  record.MeterAPIName,
-		MeterValue:    record.MeterValue,
-		UniqueID:      record.UniqueID,
-		UTCTimeMillis: record.UTCTimeMillis,
-		Dimensions:    record.Dimensions,
-	}
+	w := wireUsageRecord(record)
 	_, _, err := c.doJSON(ctx, http.MethodPost, "/ingest", []wireUsageRecord{w}, nil)
 	return err
 }

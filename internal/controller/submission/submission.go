@@ -139,10 +139,7 @@ func (c *SubmissionConsumer) Start(ctx context.Context) error {
 		"fetchBatch", c.FetchBatch,
 	)
 
-	for {
-		if ctx.Err() != nil {
-			break
-		}
+	for ctx.Err() == nil {
 
 		msgs, err := cons.Fetch(c.FetchBatch, jetstream.FetchMaxWait(ConsumerFetchTimeout))
 		if err != nil {
