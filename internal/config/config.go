@@ -85,10 +85,9 @@ type AmberfloProvider struct {
 	// environments where data loss is acceptable.
 	AllowCustomerDelete bool `json:"allowCustomerDelete,omitempty"`
 
-	// NATSConfig configures the NATS JetStream connection for the
-	// submission consumer. When nil, the consumer is not registered and
-	// the binary runs in its existing mode without any NATS dependency.
-	NATSConfig *NATSConfig `json:"natsConfig,omitempty"`
+	// Nats configures the NATS JetStream connection for the
+	// submission consumer.
+	Nats NATSConfig `json:"nats"`
 }
 
 // RestConfig returns the *rest.Config used to connect to the control
@@ -284,11 +283,6 @@ type NATSConfig struct {
 
 	// KeyFile is the path to the NATS client private key file.
 	KeyFile string `json:"keyFile,omitempty"`
-
-	// CredentialsPath is the filesystem path to the NATS credentials
-	// file (NKey or JWT credentials). When empty, no credentials are
-	// used (anonymous, for local development).
-	CredentialsPath string `json:"credentialsPath,omitempty"`
 }
 
 func init() {

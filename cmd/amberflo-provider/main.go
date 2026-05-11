@@ -222,11 +222,11 @@ func main() {
 		os.Exit(1)
 	}
 
-	if serverConfig.NATSConfig != nil {
-		nc, natsErr := connectNATS(serverConfig.NATSConfig)
+	if serverConfig.Nats.URL != "" {
+		nc, natsErr := connectNATS(&serverConfig.Nats)
 		if natsErr != nil {
 			setupLog.Error(natsErr, "unable to connect to NATS",
-				"url", serverConfig.NATSConfig.URL)
+				"url", serverConfig.Nats.URL)
 			os.Exit(1)
 		}
 		defer nc.Drain() //nolint:errcheck
@@ -256,7 +256,7 @@ func main() {
 			setupLog.Error(addErr, "unable to add submission consumer to manager")
 			os.Exit(1)
 		}
-		setupLog.Info("submission consumer registered", "natsURL", serverConfig.NATSConfig.URL)
+		setupLog.Info("submission consumer registered", "natsURL", serverConfig.Nats.URL)
 	}
 
 	// +kubebuilder:scaffold:builder
@@ -282,8 +282,9 @@ func main() {
 // otherwise the connection is anonymous (local dev only).
 func connectNATS(cfg *config.NATSConfig) (*natsgo.Conn, error) {
 	opts := []natsgo.Option{natsgo.Name("amberflo-provider")}
-	if cfg.CredentialsPath != "" {
-		opts = append(opts, natsgo.UserCredentials(cfg.CredentialsPath))
+	if cfg.CAFile != "" || cfg.CertFile != "" || cfg.KeyFile != "" {
+		opts = append(opts, natsgo.RootCAs(cfg.CAFile))
+		opts = append(opts, natsgo.ClientCert(cfg.CertFile, cfg.KeyFile))
 	}
 	return natsgo.Connect(cfg.URL, opts...)
 }
