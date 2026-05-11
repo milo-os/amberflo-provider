@@ -86,7 +86,7 @@ type wireCustomer struct {
 	CustomerEmail  string            `json:"customerEmail,omitempty"`
 	Traits         map[string]string `json:"traits,omitempty"`
 	LifecycleStage string            `json:"lifecycleStage,omitempty"`
-	Enabled        bool               `json:"enabled"`
+	Enabled        bool              `json:"enabled"`
 	UpdateTime     int64             `json:"updateTime,omitempty"`
 	CreateTime     int64             `json:"createTime,omitempty"`
 }

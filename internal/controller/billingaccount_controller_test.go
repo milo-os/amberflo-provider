@@ -225,7 +225,7 @@ var _ = Describe("BillingAccountReconciler", func() {
 			// A permanent error ends the loop; subsequent reconciles
 			// only happen on events. Allow up to 1 extra to absorb
 			// minor racing.
-			Expect(afterCount - beforeCount).To(BeNumerically("<=", 1),
+			Expect(afterCount-beforeCount).To(BeNumerically("<=", 1),
 				"unexpected retry activity after permanent error: before=%d after=%d",
 				beforeCount, afterCount)
 		})
