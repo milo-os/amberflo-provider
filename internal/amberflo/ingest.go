@@ -46,7 +46,7 @@ type wireUsageRecord struct {
 	MeterAPIName  string            `json:"meterApiName"`
 	MeterValue    int64             `json:"meterValue"`
 	UniqueID      string            `json:"uniqueId"`
-	UTCTimeMillis int64             `json:"utcTimeMillis"`
+	UTCTimeMillis int64             `json:"meterTimeInMillis"`
 	Dimensions    map[string]string `json:"dimensions,omitempty"`
 }
 
