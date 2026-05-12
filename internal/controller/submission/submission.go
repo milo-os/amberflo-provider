@@ -201,6 +201,13 @@ func (c *SubmissionConsumer) processMessage(ctx context.Context, msg jetstream.M
 		return msg.Ack()
 	}
 
+	c.Logger.Info("received usage event",
+		"eventID", ce.ID(),
+		"subject", ce.Subject(),
+		"source", ce.Source(),
+		"type", ce.Type(),
+	)
+
 	// Extract the billing account name from the CloudEvent extension.
 	exts := ce.Extensions()
 	billingAccountRef, ok := exts[billingAccountRefExtension]
@@ -277,6 +284,12 @@ func (c *SubmissionConsumer) processMessage(ctx context.Context, msg jetstream.M
 
 	submitErr := c.IngestClient.SubmitUsage(ctx, record)
 	if submitErr == nil {
+		c.Logger.Info("successfully submitted usage event to Amberflo",
+			"eventID", ce.ID(),
+			"customerID", customerID,
+			"meterAPIName", meterAPIName,
+			"meterValue", meterValue,
+		)
 		recordSubmission("success")
 		return msg.Ack()
 	}
