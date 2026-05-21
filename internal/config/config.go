@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -84,6 +85,24 @@ type AmberfloProvider struct {
 	// invoices can still be retrieved. Enable only in non-production
 	// environments where data loss is acceptable.
 	AllowCustomerDelete bool `json:"allowCustomerDelete,omitempty"`
+
+	// SubmissionBatchSize is the number of events to pull from NATS and
+	// submit in a single batch to Amberflo. Defaults to 1.
+	SubmissionBatchSize int `json:"submissionBatchSize,omitempty"`
+
+	// SubmissionRetryAfter is the default duration to wait before retrying
+	// a failed transient submission or on cache miss. Defaults to 5s.
+	SubmissionRetryAfter metav1.Duration `json:"submissionRetryAfter,omitempty"`
+
+	// SubmissionAckWait is the durable consumer's ack wait duration. Defaults to 30s.
+	SubmissionAckWait metav1.Duration `json:"submissionAckWait,omitempty"`
+
+	// SubmissionFetchTimeout is the consumer pull batch fetch timeout. Defaults to 5s.
+	SubmissionFetchTimeout metav1.Duration `json:"submissionFetchTimeout,omitempty"`
+
+	// Nats configures the NATS JetStream connection for the
+	// submission consumer.
+	Nats NATSConfig `json:"nats"`
 }
 
 // RestConfig returns the *rest.Config used to connect to the control
@@ -108,6 +127,18 @@ func SetDefaults_AmberfloProvider(obj *AmberfloProvider) {
 	}
 	if obj.AmberfloRateLimitPerSec == 0 {
 		obj.AmberfloRateLimitPerSec = 10
+	}
+	if obj.SubmissionBatchSize == 0 {
+		obj.SubmissionBatchSize = 10
+	}
+	if obj.SubmissionRetryAfter.Duration == 0 {
+		obj.SubmissionRetryAfter.Duration = 5 * time.Second
+	}
+	if obj.SubmissionAckWait.Duration == 0 {
+		obj.SubmissionAckWait.Duration = 30 * time.Second
+	}
+	if obj.SubmissionFetchTimeout.Duration == 0 {
+		obj.SubmissionFetchTimeout.Duration = 5 * time.Second
 	}
 }
 
@@ -262,6 +293,23 @@ func SetDefaults_TLSConfig(obj *TLSConfig) {
 	if len(obj.KeyName) == 0 {
 		obj.KeyName = "tls.key"
 	}
+}
+
+// +k8s:deepcopy-gen=true
+
+// NATSConfig configures the NATS connection for the submission consumer.
+type NATSConfig struct {
+	// URL is the NATS server URL, e.g. nats://nats:4222.
+	URL string `json:"url"`
+
+	// CAFile is the path to the NATS CA certificate file.
+	CAFile string `json:"caFile,omitempty"`
+
+	// CertFile is the path to the NATS client certificate file.
+	CertFile string `json:"certFile,omitempty"`
+
+	// KeyFile is the path to the NATS client private key file.
+	KeyFile string `json:"keyFile,omitempty"`
 }
 
 func init() {

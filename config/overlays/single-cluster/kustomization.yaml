@@ -12,6 +12,7 @@ namespace: amberflo-provider-system
 resources:
   - namespace.yaml
   - ../../base/manager
+  - ../../base/submission-consumer
 
 components:
   - ../../components/leader_election

@@ -22,12 +22,12 @@ import (
 
 // stubClient is a minimal Client implementation that returns fixed values.
 type stubClient struct {
-	ensureErr         error
-	disableErr        error
-	getErr            error
-	ensureMeterErr    error
-	deleteMeterErr    error
-	getMeterErr       error
+	ensureErr      error
+	disableErr     error
+	getErr         error
+	ensureMeterErr error
+	deleteMeterErr error
+	getMeterErr    error
 }
 
 func (s *stubClient) EnsureCustomer(ctx context.Context, _ DesiredCustomer) (Customer, error) {
@@ -44,6 +44,7 @@ func (s *stubClient) DeleteMeter(ctx context.Context, _ string) error { return s
 func (s *stubClient) GetMeter(ctx context.Context, _ string) (Meter, error) {
 	return Meter{}, s.getMeterErr
 }
+func (s *stubClient) SubmitUsage(ctx context.Context, _ []UsageRecord) error { return nil }
 
 func TestInstrumentedClient_DelegatesAndInstruments(t *testing.T) {
 	stub := &stubClient{}

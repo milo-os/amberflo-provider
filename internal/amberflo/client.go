@@ -77,6 +77,11 @@ type Client interface {
 	// GetMeter fetches the current meter record. Returns ErrMeterNotFound
 	// on 404.
 	GetMeter(ctx context.Context, meterAPIName string) (Meter, error)
+
+	// SubmitUsage posts usage records to the Amberflo ingest API.
+	// Returns nil on 2xx. Returns *TransientError on 5xx/429/network.
+	// Returns *PermanentError on 4xx (non-429).
+	SubmitUsage(ctx context.Context, records []UsageRecord) error
 }
 
 // ClientOptions configures a Client. BaseURL and APIKey are the only

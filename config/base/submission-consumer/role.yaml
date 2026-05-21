@@ -1,0 +1,14 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: submission-consumer
+rules:
+- apiGroups:
+  - billing.miloapis.com
+  resources:
+  - billingaccounts
+  - meterdefinitions
+  verbs:
+  - get
+  - list
+  - watch

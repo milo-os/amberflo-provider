@@ -52,3 +52,30 @@ patches:
               - name: discovery-kubeconfig
                 configMap:
                   name: amberflo-provider-discovery-kubeconfig
+  - target:
+      kind: Deployment
+      name: submission-consumer
+    patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: submission-consumer
+      spec:
+        template:
+          spec:
+            containers:
+              - name: submission-consumer
+                volumeMounts:
+                  - mountPath: /etc/kubernetes/pki/trust
+                    name: trust-bundle
+                    readOnly: true
+                  - mountPath: /etc/kubernetes/project-discovery/auth
+                    name: discovery-kubeconfig
+                    readOnly: true
+            volumes:
+              - name: trust-bundle
+                configMap:
+                  name: datum-control-plane-trust-bundle
+              - name: discovery-kubeconfig
+                configMap:
+                  name: amberflo-provider-discovery-kubeconfig
