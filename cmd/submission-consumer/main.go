@@ -31,14 +31,14 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
-	"sigs.k8s.io/controller-runtime/pkg/webhook"
+
+	natsgo "github.com/nats-io/nats.go"
 
 	billingv1alpha1 "go.miloapis.com/billing/api/v1alpha1"
 
 	"go.miloapis.com/amberflo-provider/internal/amberflo"
 	"go.miloapis.com/amberflo-provider/internal/config"
-	"go.miloapis.com/amberflo-provider/internal/controller"
-	// +kubebuilder:scaffold:imports
+	"go.miloapis.com/amberflo-provider/internal/submission"
 )
 
 var (
@@ -61,21 +61,13 @@ func init() {
 	utilruntime.Must(config.RegisterDefaults(scheme))
 
 	utilruntime.Must(billingv1alpha1.AddToScheme(scheme))
-
-	// +kubebuilder:scaffold:scheme
 }
 
 func main() {
-	var enableLeaderElection bool
-	var leaderElectionNamespace string
 	var probeAddr string
 	var serverConfigFile string
 
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
-	flag.BoolVar(&enableLeaderElection, "leader-elect", false,
-		"Enable leader election for controller manager. "+
-			"Enabling this will ensure there is only one active controller manager.")
-	flag.StringVar(&leaderElectionNamespace, "leader-elect-namespace", "", "The namespace to use for leader election.")
 	flag.StringVar(&serverConfigFile, "server-config", "", "Path to the server config file (YAML).")
 
 	opts := zap.Options{
@@ -86,7 +78,7 @@ func main() {
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 
-	setupLog.Info("starting amberflo-provider",
+	setupLog.Info("starting submission-consumer",
 		"version", version,
 		"gitCommit", gitCommit,
 		"gitTreeState", gitTreeState,
@@ -111,11 +103,6 @@ func main() {
 
 	setupLog.Info("server config", "config", serverConfig)
 
-	// Billing and services resources live in the Milo control plane, not
-	// necessarily in the cluster that hosts this controller pod. Connect
-	// to Milo using the configured kubeconfig path, falling back to
-	// ctrl.GetConfig() for local / in-cluster development where the two
-	// clusters happen to be the same.
 	cfg, err := serverConfig.RestConfig()
 	if err != nil {
 		setupLog.Error(err, "unable to load rest config")
@@ -124,10 +111,6 @@ func main() {
 
 	ctx := ctrl.SetupSignalHandler()
 
-	// Build a direct (non-cached) client so metrics/webhook TLS option
-	// builders that need a Secret reader have one available before the
-	// manager cache has started. The actual Get calls happen lazily from
-	// inside TLS GetCertificate callbacks.
 	bootstrapClient, err := client.New(cfg, client.Options{Scheme: scheme})
 	if err != nil {
 		setupLog.Error(err, "unable to create bootstrap client")
@@ -136,42 +119,17 @@ func main() {
 
 	metricsServerOptions := serverConfig.MetricsServer.Options(ctx, bootstrapClient)
 
-	var webhookServer webhook.Server
-	if serverConfig.WebhookServer != nil {
-		webhookServer = webhook.NewServer(
-			serverConfig.WebhookServer.Options(ctx, bootstrapClient),
-		)
-	} else {
-		setupLog.Info("webhookServer not configured; admission webhook server disabled")
-	}
-
 	mgr, err := ctrl.NewManager(cfg, ctrl.Options{
-		Scheme:                  scheme,
-		Metrics:                 metricsServerOptions,
-		WebhookServer:           webhookServer,
-		HealthProbeBindAddress:  probeAddr,
-		LeaderElection:          enableLeaderElection,
-		LeaderElectionID:        "amberflo-provider.providers.datum.net",
-		LeaderElectionNamespace: leaderElectionNamespace,
+		Scheme:                 scheme,
+		Metrics:                metricsServerOptions,
+		HealthProbeBindAddress: probeAddr,
+		LeaderElection:         false, // Leader election disabled for consumer instances
 	})
 	if err != nil {
 		setupLog.Error(err, "unable to start manager")
 		os.Exit(1)
 	}
 
-	// Load the Amberflo API key once at startup.
-	//
-	// Precedence:
-	//   1. File path (AmberfloAPIKeyPath in server config) — the standard
-	//      production path; the file is typically mounted from a
-	//      Kubernetes Secret.
-	//   2. Env var AMBERFLO_API_KEY — a local-dev / sandbox ergonomics
-	//      escape hatch used by `task test:create-amberflo-credentials`
-	//      and direct `go run` invocations.
-	//   3. Error out so misconfiguration is loud.
-	//
-	// The sha256 prefix of the key is logged so rotations are auditable
-	// without leaking the secret itself.
 	apiKey, keySource, err := loadAPIKey(serverConfig.AmberfloAPIKeyPath, os.Getenv("AMBERFLO_API_KEY"))
 	if err != nil {
 		setupLog.Error(err, "unable to load Amberflo API key",
@@ -187,39 +145,56 @@ func main() {
 		BaseURL:         serverConfig.AmberfloBaseURL,
 		APIKey:          apiKey,
 		RateLimitPerSec: serverConfig.AmberfloRateLimitPerSec,
-		UserAgent:       fmt.Sprintf("amberflo-provider/%s", version),
+		UserAgent:       fmt.Sprintf("submission-consumer/%s", version),
 	})
 	if err != nil {
 		setupLog.Error(err, "unable to construct Amberflo client")
 		os.Exit(1)
 	}
-	// Wrap in the metrics-instrumented client so every outbound call is
-	// counted and timed via Prometheus.
 	amberfloClient = amberflo.NewInstrumentedClient(amberfloClient)
 
-	if err = (&controller.BillingAccountReconciler{
-		Client:              mgr.GetClient(),
-		AmberfloClient:      amberfloClient,
-		AllowCustomerDelete: serverConfig.AllowCustomerDelete,
-	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "BillingAccount")
+	if serverConfig.Nats.URL == "" {
+		setupLog.Error(fmt.Errorf("NATS URL must be configured"), "")
 		os.Exit(1)
 	}
 
-	if err = (&controller.MeterDefinitionReconciler{
-		Client:         mgr.GetClient(),
-		AmberfloClient: amberfloClient,
-	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "MeterDefinition")
+	nc, natsErr := connectNATS(&serverConfig.Nats)
+	if natsErr != nil {
+		setupLog.Error(natsErr, "unable to connect to NATS",
+			"url", serverConfig.Nats.URL)
+		os.Exit(1)
+	}
+	defer nc.Drain() //nolint:errcheck
+
+	baCache, cacheErr := submission.NewBillingAccountCache(ctx, mgr.GetCache())
+	if cacheErr != nil {
+		setupLog.Error(cacheErr, "unable to create BillingAccountCache")
 		os.Exit(1)
 	}
 
-	if err = controller.AddIndexers(ctx, mgr.GetFieldIndexer()); err != nil {
-		setupLog.Error(err, "unable to add indexers")
+	meterCache, cacheErr := submission.NewMeterDefinitionCache(ctx, mgr.GetCache())
+	if cacheErr != nil {
+		setupLog.Error(cacheErr, "unable to create MeterDefinitionCache")
 		os.Exit(1)
 	}
 
-	// +kubebuilder:scaffold:builder
+	submissionConsumer := &submission.SubmissionConsumer{
+		Cache:               mgr.GetCache(),
+		NC:                  nc,
+		IngestClient:        amberfloClient,
+		BillingAccountCache: baCache,
+		MeterCache:          meterCache,
+		Logger:              ctrl.Log.WithName("submission-consumer"),
+		FetchBatch:          serverConfig.SubmissionBatchSize,
+		RetryAfter:          serverConfig.SubmissionRetryAfter.Duration,
+		AckWait:             serverConfig.SubmissionAckWait.Duration,
+		FetchTimeout:        serverConfig.SubmissionFetchTimeout.Duration,
+	}
+	if addErr := mgr.Add(submissionConsumer); addErr != nil {
+		setupLog.Error(addErr, "unable to add submission consumer to manager")
+		os.Exit(1)
+	}
+	setupLog.Info("submission consumer registered", "natsURL", serverConfig.Nats.URL)
 
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
 		setupLog.Error(err, "unable to set up health check")
@@ -237,24 +212,15 @@ func main() {
 	}
 }
 
-// loadAPIKey resolves the Amberflo API key using the documented
-// precedence:
-//
-//  1. File at path (production / Secret mount) — used when the path is
-//     set and the file is present and non-empty.
-//  2. Env var AMBERFLO_API_KEY — used when the file path is unset OR
-//     when the file is not present. This is the local-dev / sandbox
-//     escape hatch and lets the task system inject the key via a
-//     `dotenv:` loaded .env file.
-//  3. Error — neither a readable file nor a non-empty env var.
-//
-// If the path is set and the file exists but is empty/malformed we
-// return the error rather than silently falling back — a misconfigured
-// mount should fail loudly, not mask production credentials with a
-// local one.
-//
-// Returns the trimmed key and a short source label for logging
-// ("file:<path>" or "env:AMBERFLO_API_KEY").
+func connectNATS(cfg *config.NATSConfig) (*natsgo.Conn, error) {
+	opts := []natsgo.Option{natsgo.Name("submission-consumer")}
+	if cfg.CAFile != "" || cfg.CertFile != "" || cfg.KeyFile != "" {
+		opts = append(opts, natsgo.RootCAs(cfg.CAFile))
+		opts = append(opts, natsgo.ClientCert(cfg.CertFile, cfg.KeyFile))
+	}
+	return natsgo.Connect(cfg.URL, opts...)
+}
+
 func loadAPIKey(path, envValue string) (string, string, error) {
 	envKey := strings.TrimSpace(envValue)
 
@@ -268,8 +234,7 @@ func loadAPIKey(path, envValue string) (string, string, error) {
 			}
 			return key, "file:" + path, nil
 		case os.IsNotExist(err):
-			// Fall through to env var — common for local dev where the
-			// default path points to a Secret mount that doesn't exist.
+			// Fall through to env var
 		default:
 			return "", "", fmt.Errorf("read %q: %w", path, err)
 		}
@@ -284,9 +249,6 @@ func loadAPIKey(path, envValue string) (string, string, error) {
 	)
 }
 
-// keyFingerprint returns the first 8 hex chars of sha256(key). Intended
-// for audit logs so operators can correlate a running pod with which
-// version of the Secret it loaded, without leaking the key itself.
 func keyFingerprint(key string) string {
 	sum := sha256.Sum256([]byte(key))
 	return hex.EncodeToString(sum[:])[:8]

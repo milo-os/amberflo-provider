@@ -31,12 +31,20 @@ RUN --mount=type=cache,target=/go/pkg/mod/ \
       -X main.gitCommit=${GIT_COMMIT} \
       -X main.gitTreeState=${GIT_TREE_STATE} \
       -X main.buildDate=${BUILD_DATE}" \
-    -o amberflo-provider ./cmd/amberflo-provider
+    -o amberflo-provider ./cmd/amberflo-provider && \
+  CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build \
+    -ldflags "-s -w \
+      -X main.version=${VERSION} \
+      -X main.gitCommit=${GIT_COMMIT} \
+      -X main.gitTreeState=${GIT_TREE_STATE} \
+      -X main.buildDate=${BUILD_DATE}" \
+    -o submission-consumer ./cmd/submission-consumer
 
-# Use distroless as minimal base image to package the amberflo-provider binary
+# Use distroless as minimal base image to package the binaries
 FROM gcr.io/distroless/static:nonroot
 WORKDIR /
 COPY --from=builder /workspace/amberflo-provider /amberflo-provider
+COPY --from=builder /workspace/submission-consumer /submission-consumer
 USER 65532:65532
 
 ENTRYPOINT ["/amberflo-provider"]

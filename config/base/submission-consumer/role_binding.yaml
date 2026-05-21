@@ -1,0 +1,12 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: submission-consumer
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: submission-consumer
+subjects:
+  - kind: ServiceAccount
+    name: submission-consumer
+    namespace: amberflo-provider-system

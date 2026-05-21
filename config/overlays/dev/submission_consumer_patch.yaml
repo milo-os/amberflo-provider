@@ -1,0 +1,16 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: submission-consumer
+spec:
+  template:
+    spec:
+      containers:
+        - name: submission-consumer
+          imagePullPolicy: IfNotPresent
+          volumeMounts:
+            - $patch: delete
+              name: nats-certs
+      volumes:
+        - $patch: delete
+          name: nats-certs

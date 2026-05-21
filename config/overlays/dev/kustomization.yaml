@@ -6,6 +6,7 @@ namespace: amberflo-provider-system
 resources:
   - namespace.yaml
   - ../../base/manager
+  - ../../base/submission-consumer
 
 components:
   - ../../components/leader_election
@@ -23,3 +24,7 @@ patches:
       kind: Deployment
       name: amberflo-provider
     path: deployment_patch.yaml
+  - target:
+      kind: Deployment
+      name: submission-consumer
+    path: submission_consumer_patch.yaml

@@ -1,23 +1,23 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: amberflo-provider
+  name: submission-consumer
   labels:
-    control-plane: amberflo-provider
-    app.kubernetes.io/name: amberflo-provider
+    control-plane: submission-consumer
+    app.kubernetes.io/name: submission-consumer
     app.kubernetes.io/managed-by: kustomize
 spec:
   selector:
     matchLabels:
-      control-plane: amberflo-provider
+      control-plane: submission-consumer
   replicas: 1
   template:
     metadata:
       annotations:
-        kubectl.kubernetes.io/default-container: manager
+        kubectl.kubernetes.io/default-container: submission-consumer
       labels:
-        control-plane: amberflo-provider
-        app.kubernetes.io/name: amberflo-provider
+        control-plane: submission-consumer
+        app.kubernetes.io/name: submission-consumer
     spec:
       securityContext:
         runAsNonRoot: true
@@ -29,17 +29,15 @@ spec:
                 topologyKey: kubernetes.io/hostname
                 labelSelector:
                   matchLabels:
-                    control-plane: amberflo-provider
+                    control-plane: submission-consumer
       containers:
         - command:
-            - /amberflo-provider
+            - /submission-consumer
           args:
-            - --leader-elect
-            - --leader-elect-namespace=kube-system
             - --health-probe-bind-address=:8081
             - --server-config=/config/config.yaml
           image: ghcr.io/milo-os/amberflo-provider:dev
-          name: manager
+          name: submission-consumer
           ports:
             - containerPort: 8080
               name: metrics
@@ -71,9 +69,22 @@ spec:
           volumeMounts:
             - name: config
               mountPath: /config
-      serviceAccountName: amberflo-provider
+            - name: nats-certs
+              mountPath: /etc/nats-certs
+              readOnly: true
+      serviceAccountName: submission-consumer
       terminationGracePeriodSeconds: 10
       volumes:
         - name: config
           configMap:
             name: amberflo-provider-config
+        - name: nats-certs
+          csi:
+            driver: csi.cert-manager.io
+            readOnly: true
+            volumeAttributes:
+              csi.cert-manager.io/issuer-name: nats
+              csi.cert-manager.io/issuer-kind: ClusterIssuer
+              csi.cert-manager.io/common-name: amberflo-provider.nats.client
+              csi.cert-manager.io/subject-organizations: datum
+              csi.cert-manager.io/fs-group: "65532"
