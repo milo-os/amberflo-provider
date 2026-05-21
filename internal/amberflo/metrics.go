@@ -128,9 +128,9 @@ func (ic *InstrumentedClient) GetMeter(ctx context.Context, meterAPIName string)
 }
 
 // SubmitUsage forwards to the wrapped client while recording metrics.
-func (ic *InstrumentedClient) SubmitUsage(ctx context.Context, record UsageRecord) error {
+func (ic *InstrumentedClient) SubmitUsage(ctx context.Context, records []UsageRecord) error {
 	start := time.Now()
-	err := ic.Client.SubmitUsage(ctx, record)
+	err := ic.Client.SubmitUsage(ctx, records)
 	recordOp("SubmitUsage", start, err)
 	return err
 }

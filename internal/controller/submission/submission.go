@@ -150,7 +150,9 @@ func (c *SubmissionConsumer) Start(ctx context.Context) error {
 
 		// Track the oldest message in this batch to report processing lag metrics.
 		var oldestTimestamp time.Time
+		var batchMsgs []jetstream.Msg
 		for msg := range msgs.Messages() {
+			batchMsgs = append(batchMsgs, msg)
 			meta, metaErr := msg.Metadata()
 			if metaErr == nil && !meta.Timestamp.IsZero() {
 				// Update the batch-local oldest timestamp.
@@ -160,18 +162,10 @@ func (c *SubmissionConsumer) Start(ctx context.Context) error {
 				// Update the "age" gauge with the current message's duration in the stream.
 				setOldestUnsubmittedAge(time.Since(meta.Timestamp).Seconds())
 			}
+		}
 
-			// Process the individual message: resolve IDs and submit to Amberflo.
-			if processErr := c.processMessage(ctx, msg); processErr != nil {
-				c.Logger.Error(processErr, "processMessage error; nacking",
-					"subject", msg.Subject(),
-				)
-				// Negative Acknowledgement (Nak) ensures the message is redelivered
-				// and not lost if processing failed (e.g., transient network issues).
-				if nakErr := msg.Nak(); nakErr != nil {
-					c.Logger.Error(nakErr, "failed to nack message", "subject", msg.Subject())
-				}
-			}
+		if len(batchMsgs) > 0 {
+			c.processMessages(ctx, batchMsgs)
 		}
 
 		if fetchErr := msgs.Error(); fetchErr != nil {
@@ -187,18 +181,29 @@ func (c *SubmissionConsumer) Start(ctx context.Context) error {
 	return nil
 }
 
-// processMessage processes a single JetStream message: resolves the Amberflo
-// customer and meter IDs from the informer caches, submits the usage record,
-// and acks or nacks based on the outcome.
-func (c *SubmissionConsumer) processMessage(ctx context.Context, msg jetstream.Msg) error {
+type permanentValidationError struct {
+	err error
+}
+
+func (e permanentValidationError) Error() string {
+	return e.err.Error()
+}
+
+func isPermanentValidationError(err error) bool {
+	_, ok := err.(permanentValidationError)
+	return ok
+}
+
+// prepareRecord parses and validates a NATS message into an amberflo.UsageRecord.
+// It logs any validation errors and returns a permanentValidationError for discardable issues.
+func (c *SubmissionConsumer) prepareRecord(msg jetstream.Msg) (*amberflo.UsageRecord, error) {
 	// Deserialise the CloudEvent from the NATS message body.
 	var ce cloudevents.Event
 	if err := json.Unmarshal(msg.Data(), &ce); err != nil {
 		c.Logger.Error(err, "malformed CloudEvent; discarding",
 			"subject", msg.Subject(),
 		)
-		recordSubmission("permanent")
-		return msg.Ack()
+		return nil, permanentValidationError{err: err}
 	}
 
 	c.Logger.Info("received usage event",
@@ -215,8 +220,7 @@ func (c *SubmissionConsumer) processMessage(ctx context.Context, msg jetstream.M
 		c.Logger.Error(nil, "CloudEvent missing billingaccountref extension; discarding",
 			"eventID", ce.ID(),
 		)
-		recordSubmission("permanent")
-		return msg.Ack()
+		return nil, permanentValidationError{err: fmt.Errorf("missing billingaccountref")}
 	}
 	baName := fmt.Sprintf("%v", billingAccountRef)
 
@@ -227,7 +231,7 @@ func (c *SubmissionConsumer) processMessage(ctx context.Context, msg jetstream.M
 			"billingAccountRef", baName,
 			"eventID", ce.ID(),
 		)
-		return msg.Nak()
+		return nil, fmt.Errorf("BillingAccount %q not found in cache", baName)
 	}
 	customerID := string(baUID)
 
@@ -238,7 +242,7 @@ func (c *SubmissionConsumer) processMessage(ctx context.Context, msg jetstream.M
 			"meterName", ce.Type(),
 			"eventID", ce.ID(),
 		)
-		return msg.Nak()
+		return nil, fmt.Errorf("MeterDefinition %q not found in cache", ce.Type())
 	}
 	meterAPIName := string(meterUID)
 
@@ -248,8 +252,7 @@ func (c *SubmissionConsumer) processMessage(ctx context.Context, msg jetstream.M
 		c.Logger.Error(err, "failed to decode CloudEvent data; discarding",
 			"eventID", ce.ID(),
 		)
-		recordSubmission("permanent")
-		return msg.Ack()
+		return nil, permanentValidationError{err: err}
 	}
 
 	// Parse the string-encoded int64 value.
@@ -259,8 +262,7 @@ func (c *SubmissionConsumer) processMessage(ctx context.Context, msg jetstream.M
 			"eventID", ce.ID(),
 			"value", data.Value,
 		)
-		recordSubmission("permanent")
-		return msg.Ack()
+		return nil, permanentValidationError{err: err}
 	}
 
 	// Derive the deterministic ULID idempotency key.
@@ -269,46 +271,109 @@ func (c *SubmissionConsumer) processMessage(ctx context.Context, msg jetstream.M
 		c.Logger.Error(err, "failed to derive ULID from CloudEvent ID; discarding",
 			"eventID", ce.ID(),
 		)
-		recordSubmission("permanent")
-		return msg.Ack()
+		return nil, permanentValidationError{err: err}
 	}
 
-	record := amberflo.UsageRecord{
+	return &amberflo.UsageRecord{
 		CustomerID:    customerID,
 		MeterAPIName:  meterAPIName,
 		MeterValue:    meterValue,
 		UniqueID:      uniqueID,
 		UTCTimeMillis: ce.Time().UnixMilli(),
 		Dimensions:    data.Dimensions,
+	}, nil
+}
+
+// processMessages processes a batch of JetStream messages: validates them,
+// submits valid ones in a bulk request to Amberflo, and handles transient
+// and permanent errors (falling back to individual requests if a batch fails).
+func (c *SubmissionConsumer) processMessages(ctx context.Context, msgs []jetstream.Msg) {
+	var validatedRecords []amberflo.UsageRecord
+	var validatedMsgs []jetstream.Msg
+
+	for _, msg := range msgs {
+		record, err := c.prepareRecord(msg)
+		if err != nil {
+			if isPermanentValidationError(err) {
+				recordSubmission("permanent")
+				if ackErr := msg.Ack(); ackErr != nil {
+					c.Logger.Error(ackErr, "failed to ack message", "subject", msg.Subject())
+				}
+			} else {
+				// Transient validation error (e.g. cache miss)
+				if nakErr := msg.Nak(); nakErr != nil {
+					c.Logger.Error(nakErr, "failed to nack message", "subject", msg.Subject())
+				}
+			}
+			continue
+		}
+
+		validatedRecords = append(validatedRecords, *record)
+		validatedMsgs = append(validatedMsgs, msg)
 	}
 
-	submitErr := c.IngestClient.SubmitUsage(ctx, record)
+	if len(validatedRecords) == 0 {
+		return
+	}
+
+	// Submit the batch of validated records
+	submitErr := c.IngestClient.SubmitUsage(ctx, validatedRecords)
 	if submitErr == nil {
-		c.Logger.Info("successfully submitted usage event to Amberflo",
-			"eventID", ce.ID(),
-			"customerID", customerID,
-			"meterAPIName", meterAPIName,
-			"meterValue", meterValue,
-		)
-		recordSubmission("success")
-		return msg.Ack()
+		c.Logger.Info("successfully submitted batch of usage events to Amberflo", "count", len(validatedRecords))
+		for _, msg := range validatedMsgs {
+			recordSubmission("success")
+			if ackErr := msg.Ack(); ackErr != nil {
+				c.Logger.Error(ackErr, "failed to ack message", "subject", msg.Subject())
+			}
+		}
+		return
 	}
 
 	if amberflo.IsPermanent(submitErr) {
-		c.Logger.Error(submitErr, "permanent Amberflo ingest error; discarding event",
-			"eventID", ce.ID(),
-			"customerID", customerID,
-			"meterAPIName", meterAPIName,
-		)
-		recordSubmission("permanent")
-		return msg.Ack()
+		c.Logger.Error(submitErr, "permanent Amberflo ingest error on batch; falling back to individual submissions to isolate error", "count", len(validatedRecords))
+		// Fall back to individual submissions to isolate the bad event so we don't discard the whole batch
+		for i, record := range validatedRecords {
+			msg := validatedMsgs[i]
+			indivErr := c.IngestClient.SubmitUsage(ctx, []amberflo.UsageRecord{record})
+			if indivErr == nil {
+				c.Logger.Info("successfully submitted usage event to Amberflo on fallback",
+					"customerID", record.CustomerID,
+					"meterAPIName", record.MeterAPIName,
+					"meterValue", record.MeterValue,
+				)
+				recordSubmission("success")
+				if ackErr := msg.Ack(); ackErr != nil {
+					c.Logger.Error(ackErr, "failed to ack message on fallback", "subject", msg.Subject())
+				}
+			} else if amberflo.IsPermanent(indivErr) {
+				c.Logger.Error(indivErr, "permanent Amberflo ingest error on fallback; discarding event",
+					"customerID", record.CustomerID,
+					"meterAPIName", record.MeterAPIName,
+				)
+				recordSubmission("permanent")
+				if ackErr := msg.Ack(); ackErr != nil {
+					c.Logger.Error(ackErr, "failed to ack message on fallback", "subject", msg.Subject())
+				}
+			} else {
+				// Transient
+				c.Logger.V(1).Info("transient Amberflo ingest error on fallback; nacking for retry",
+					"err", indivErr,
+				)
+				recordSubmission("transient")
+				if nakErr := msg.Nak(); nakErr != nil {
+					c.Logger.Error(nakErr, "failed to nack message on fallback", "subject", msg.Subject())
+				}
+			}
+		}
+		return
 	}
 
-	// Transient (5xx/429/network): nack for redelivery.
-	c.Logger.V(1).Info("transient Amberflo ingest error; nacking for retry",
-		"eventID", ce.ID(),
-		"err", submitErr,
-	)
-	recordSubmission("transient")
-	return msg.Nak()
+	// Transient error on batch submission (e.g. network/503/429)
+	c.Logger.V(1).Info("transient Amberflo ingest error on batch; nacking all for retry", "err", submitErr)
+	for _, msg := range validatedMsgs {
+		recordSubmission("transient")
+		if nakErr := msg.Nak(); nakErr != nil {
+			c.Logger.Error(nakErr, "failed to nack message", "subject", msg.Subject())
+		}
+	}
 }

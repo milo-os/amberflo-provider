@@ -22,7 +22,7 @@ import (
 // as a narrow interface so unit tests can substitute a fake without
 // implementing the full Client contract.
 type IngestClient interface {
-	SubmitUsage(ctx context.Context, record UsageRecord) error
+	SubmitUsage(ctx context.Context, records []UsageRecord) error
 }
 
 // UsageRecord is a single metered usage event to submit to Amberflo.
@@ -47,9 +47,12 @@ type wireUsageRecord struct {
 	Dimensions    map[string]string `json:"dimensions,omitempty"`
 }
 
-// SubmitUsage posts a single usage record to the Amberflo ingest API.
-func (c *client) SubmitUsage(ctx context.Context, record UsageRecord) error {
-	w := wireUsageRecord(record)
-	_, _, err := c.doJSON(ctx, http.MethodPost, "/ingest", []wireUsageRecord{w}, nil)
+// SubmitUsage posts usage records to the Amberflo ingest API.
+func (c *client) SubmitUsage(ctx context.Context, records []UsageRecord) error {
+	w := make([]wireUsageRecord, len(records))
+	for i, r := range records {
+		w[i] = wireUsageRecord(r)
+	}
+	_, _, err := c.doJSON(ctx, http.MethodPost, "/ingest", w, nil)
 	return err
 }

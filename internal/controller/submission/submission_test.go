@@ -58,8 +58,8 @@ type fakeIngestClient struct {
 	received  []amberflo.UsageRecord
 }
 
-func (f *fakeIngestClient) SubmitUsage(_ context.Context, r amberflo.UsageRecord) error {
-	f.received = append(f.received, r)
+func (f *fakeIngestClient) SubmitUsage(_ context.Context, records []amberflo.UsageRecord) error {
+	f.received = append(f.received, records...)
 	return f.submitErr
 }
 
@@ -134,9 +134,7 @@ func TestProcessMessage_HappyPath(t *testing.T) {
 		subject: "billing.usage.proj-1.valid",
 	}
 
-	if err := consumer.processMessage(context.Background(), msg); err != nil {
-		t.Fatalf("processMessage: %v", err)
-	}
+	consumer.processMessages(context.Background(), []jetstream.Msg{msg})
 
 	if !msg.acked {
 		t.Error("expected message to be acked")
@@ -176,9 +174,7 @@ func TestProcessMessage_MalformedCloudEvent(t *testing.T) {
 		subject: "billing.usage.proj-1.valid",
 	}
 
-	if err := consumer.processMessage(context.Background(), msg); err != nil {
-		t.Fatalf("processMessage: %v", err)
-	}
+	consumer.processMessages(context.Background(), []jetstream.Msg{msg})
 
 	if !msg.acked {
 		t.Error("expected malformed event to be acked (discarded)")
@@ -205,9 +201,7 @@ func TestProcessMessage_BillingAccountCacheMiss(t *testing.T) {
 		subject: "billing.usage.proj-1.valid",
 	}
 
-	if err := consumer.processMessage(context.Background(), msg); err != nil {
-		t.Fatalf("processMessage: %v", err)
-	}
+	consumer.processMessages(context.Background(), []jetstream.Msg{msg})
 
 	if !msg.naked {
 		t.Error("expected message to be nacked on billing account cache miss")
@@ -233,9 +227,7 @@ func TestProcessMessage_MeterDefinitionCacheMiss(t *testing.T) {
 		subject: "billing.usage.proj-1.valid",
 	}
 
-	if err := consumer.processMessage(context.Background(), msg); err != nil {
-		t.Fatalf("processMessage: %v", err)
-	}
+	consumer.processMessages(context.Background(), []jetstream.Msg{msg})
 
 	if !msg.naked {
 		t.Error("expected message to be nacked on cache miss")
@@ -265,9 +257,7 @@ func TestProcessMessage_TransientIngestError(t *testing.T) {
 		subject: "billing.usage.proj-1.valid",
 	}
 
-	if err := consumer.processMessage(context.Background(), msg); err != nil {
-		t.Fatalf("processMessage: %v", err)
-	}
+	consumer.processMessages(context.Background(), []jetstream.Msg{msg})
 
 	if !msg.naked {
 		t.Error("expected message to be nacked on transient ingest error")
@@ -297,9 +287,7 @@ func TestProcessMessage_PermanentIngestError(t *testing.T) {
 		subject: "billing.usage.proj-1.valid",
 	}
 
-	if err := consumer.processMessage(context.Background(), msg); err != nil {
-		t.Fatalf("processMessage: %v", err)
-	}
+	consumer.processMessages(context.Background(), []jetstream.Msg{msg})
 
 	if !msg.acked {
 		t.Error("expected message to be acked on permanent ingest error (discard)")
@@ -337,9 +325,7 @@ func TestProcessMessage_MalformedEventDataValue(t *testing.T) {
 	data, _ := json.Marshal(raw)
 	msg := &fakeMsg{data: data, subject: "billing.usage.proj-1.valid"}
 
-	if err := consumer.processMessage(context.Background(), msg); err != nil {
-		t.Fatalf("processMessage: %v", err)
-	}
+	consumer.processMessages(context.Background(), []jetstream.Msg{msg})
 
 	if !msg.acked {
 		t.Error("expected message with non-integer value to be acked (discarded)")
@@ -375,14 +361,197 @@ func TestProcessMessage_MissingBillingAccountRef(t *testing.T) {
 
 	msg := &fakeMsg{data: data, subject: "billing.usage.proj-1.valid"}
 
-	if err := consumer.processMessage(context.Background(), msg); err != nil {
-		t.Fatalf("processMessage: %v", err)
-	}
+	consumer.processMessages(context.Background(), []jetstream.Msg{msg})
 
 	if !msg.acked {
 		t.Error("expected message without billingaccountref to be acked (discarded)")
 	}
 	if len(ingest.received) != 0 {
 		t.Error("expected no ingest call for event missing billingaccountref")
+	}
+}
+
+// fakeBatchIngestClient lets us mock SubmitUsage for specific lists of records.
+type fakeBatchIngestClient struct {
+	submitFunc func(ctx context.Context, records []amberflo.UsageRecord) error
+	received   []amberflo.UsageRecord
+}
+
+func (f *fakeBatchIngestClient) SubmitUsage(ctx context.Context, records []amberflo.UsageRecord) error {
+	f.received = append(f.received, records...)
+	return f.submitFunc(ctx, records)
+}
+
+func TestProcessMessages_HappyPath_Batch(t *testing.T) {
+	meterName := "compute.miloapis.com/cpu"
+	meterUID := types.UID("meter-uid-abc")
+	baUID := types.UID("billing-account-uid-abc")
+
+	calledBatch := false
+	ingest := &fakeBatchIngestClient{
+		submitFunc: func(ctx context.Context, records []amberflo.UsageRecord) error {
+			if len(records) == 2 {
+				calledBatch = true
+			}
+			return nil
+		},
+	}
+	consumer := newTestConsumer(t, ingest,
+		meterCacheWith(map[string]types.UID{meterName: meterUID}),
+		baCacheWith(map[string]types.UID{"acct-xyz": baUID}),
+	)
+
+	msg1 := &fakeMsg{
+		data:    buildCloudEventJSON(t, "evt-001", meterName, "acct-xyz", 100, nil),
+		subject: "billing.usage.proj-1.valid",
+	}
+	msg2 := &fakeMsg{
+		data:    buildCloudEventJSON(t, "evt-002", meterName, "acct-xyz", 200, nil),
+		subject: "billing.usage.proj-1.valid",
+	}
+
+	consumer.processMessages(context.Background(), []jetstream.Msg{msg1, msg2})
+
+	if !calledBatch {
+		t.Error("expected SubmitUsage to be called as a batch of 2")
+	}
+	if !msg1.acked || !msg2.acked {
+		t.Error("expected both messages to be acked")
+	}
+	if len(ingest.received) != 2 {
+		t.Fatalf("expected 2 usage records received, got %d", len(ingest.received))
+	}
+}
+
+func TestProcessMessages_TransientValidationAndSuccess(t *testing.T) {
+	meterName := "compute.miloapis.com/cpu"
+	meterUID := types.UID("meter-uid-abc")
+	baUID := types.UID("billing-account-uid-abc")
+
+	ingest := &fakeBatchIngestClient{
+		submitFunc: func(ctx context.Context, records []amberflo.UsageRecord) error {
+			return nil
+		},
+	}
+	consumer := newTestConsumer(t, ingest,
+		meterCacheWith(map[string]types.UID{meterName: meterUID}),
+		baCacheWith(map[string]types.UID{"acct-xyz": baUID}),
+	)
+
+	// Valid message
+	msgValid := &fakeMsg{
+		data:    buildCloudEventJSON(t, "evt-valid", meterName, "acct-xyz", 100, nil),
+		subject: "billing.usage.proj-1.valid",
+	}
+	// Malformed (permanent validation error)
+	msgMalformed := &fakeMsg{
+		data:    []byte("not json"),
+		subject: "billing.usage.proj-1.valid",
+	}
+	// Cache miss (transient validation error)
+	msgCacheMiss := &fakeMsg{
+		data:    buildCloudEventJSON(t, "evt-miss", "unknown-meter", "acct-xyz", 100, nil),
+		subject: "billing.usage.proj-1.valid",
+	}
+
+	consumer.processMessages(context.Background(), []jetstream.Msg{msgValid, msgMalformed, msgCacheMiss})
+
+	if !msgValid.acked {
+		t.Error("expected valid message to be acked")
+	}
+	if !msgMalformed.acked {
+		t.Error("expected malformed message to be acked (discarded)")
+	}
+	if !msgCacheMiss.naked {
+		t.Error("expected cache miss message to be nacked (transient)")
+	}
+
+	if len(ingest.received) != 1 {
+		t.Fatalf("expected 1 record to be submitted, got %d", len(ingest.received))
+	}
+	if ingest.received[0].UniqueID == "" {
+		t.Error("expected non-empty UniqueID for valid message")
+	}
+}
+
+func TestProcessMessages_BatchPermanentErrorFallback(t *testing.T) {
+	meterName := "compute.miloapis.com/cpu"
+	meterUID := types.UID("meter-uid-abc")
+	baUID := types.UID("billing-account-uid-abc")
+
+	// We want to simulate Amberflo rejecting the batch of 2,
+	// but succeeding when we send them individually except for the bad one.
+	calls := 0
+	ingest := &fakeBatchIngestClient{
+		submitFunc: func(ctx context.Context, records []amberflo.UsageRecord) error {
+			calls++
+			if len(records) == 2 {
+				// Reject the batch with a permanent error
+				return &amberflo.PermanentError{Err: fmt.Errorf("bad batch"), StatusCode: 400}
+			}
+			// When processing individually, reject the record with MeterValue = 999
+			if records[0].MeterValue == 999 {
+				return &amberflo.PermanentError{Err: fmt.Errorf("bad value"), StatusCode: 400}
+			}
+			return nil
+		},
+	}
+	consumer := newTestConsumer(t, ingest,
+		meterCacheWith(map[string]types.UID{meterName: meterUID}),
+		baCacheWith(map[string]types.UID{"acct-xyz": baUID}),
+	)
+
+	msgGood := &fakeMsg{
+		data:    buildCloudEventJSON(t, "evt-good", meterName, "acct-xyz", 100, nil),
+		subject: "billing.usage.proj-1.valid",
+	}
+	msgBad := &fakeMsg{
+		data:    buildCloudEventJSON(t, "evt-bad", meterName, "acct-xyz", 999, nil),
+		subject: "billing.usage.proj-1.valid",
+	}
+
+	consumer.processMessages(context.Background(), []jetstream.Msg{msgGood, msgBad})
+
+	// Total calls: 1 (batch) + 2 (fallback) = 3 calls
+	if calls != 3 {
+		t.Errorf("expected 3 SubmitUsage calls, got %d", calls)
+	}
+
+	if !msgGood.acked {
+		t.Error("expected good message to be acked")
+	}
+	if !msgBad.acked {
+		t.Error("expected bad message to be acked (discarded) after permanent individual error")
+	}
+}
+
+func TestProcessMessages_BatchTransientError(t *testing.T) {
+	meterName := "compute.miloapis.com/cpu"
+	meterUID := types.UID("meter-uid-abc")
+	baUID := types.UID("billing-account-uid-abc")
+
+	ingest := &fakeBatchIngestClient{
+		submitFunc: func(ctx context.Context, records []amberflo.UsageRecord) error {
+			return &amberflo.TransientError{Err: fmt.Errorf("503 service unavailable"), StatusCode: 503}
+		},
+	}
+	consumer := newTestConsumer(t, ingest,
+		meterCacheWith(map[string]types.UID{meterName: meterUID}),
+		baCacheWith(map[string]types.UID{"acct-xyz": baUID}),
+	)
+
+	msg1 := &fakeMsg{
+		data:    buildCloudEventJSON(t, "evt-001", meterName, "acct-xyz", 100, nil),
+		subject: "billing.usage.proj-1.valid",
+	}
+	msg2 := &fakeMsg{
+		data:    buildCloudEventJSON(t, "evt-002", meterName, "acct-xyz", 200, nil),
+		subject: "billing.usage.proj-1.valid",
+	}
+
+	consumer.processMessages(context.Background(), []jetstream.Msg{msg1, msg2})
+
+	if !msg1.naked || !msg2.naked {
+		t.Error("expected both messages to be nacked on transient batch error")
 	}
 }

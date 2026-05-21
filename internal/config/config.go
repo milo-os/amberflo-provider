@@ -85,6 +85,10 @@ type AmberfloProvider struct {
 	// environments where data loss is acceptable.
 	AllowCustomerDelete bool `json:"allowCustomerDelete,omitempty"`
 
+	// SubmissionBatchSize is the number of events to pull from NATS and
+	// submit in a single batch to Amberflo. Defaults to 1.
+	SubmissionBatchSize int `json:"submissionBatchSize,omitempty"`
+
 	// Nats configures the NATS JetStream connection for the
 	// submission consumer.
 	Nats NATSConfig `json:"nats"`
@@ -112,6 +116,9 @@ func SetDefaults_AmberfloProvider(obj *AmberfloProvider) {
 	}
 	if obj.AmberfloRateLimitPerSec == 0 {
 		obj.AmberfloRateLimitPerSec = 10
+	}
+	if obj.SubmissionBatchSize == 0 {
+		obj.SubmissionBatchSize = 10
 	}
 }
 

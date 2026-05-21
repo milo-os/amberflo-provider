@@ -110,7 +110,7 @@ func TestIngestClient_SubmitUsage_Success(t *testing.T) {
 	c := newIngestClientForTest(t, s.URL(), s.apiKey)
 	rec := sampleRecord()
 
-	if err := c.SubmitUsage(context.Background(), rec); err != nil {
+	if err := c.SubmitUsage(context.Background(), []UsageRecord{rec}); err != nil {
 		t.Fatalf("SubmitUsage: unexpected error: %v", err)
 	}
 
@@ -150,7 +150,7 @@ func TestIngestClient_SubmitUsage_500IsTransient(t *testing.T) {
 
 	c := newIngestClientForTest(t, s.URL(), s.apiKey)
 
-	err := c.SubmitUsage(context.Background(), sampleRecord())
+	err := c.SubmitUsage(context.Background(), []UsageRecord{sampleRecord()})
 	if err == nil {
 		t.Fatal("expected error for 500 response")
 	}
@@ -165,7 +165,7 @@ func TestIngestClient_SubmitUsage_400IsPermanent(t *testing.T) {
 
 	c := newIngestClientForTest(t, s.URL(), s.apiKey)
 
-	err := c.SubmitUsage(context.Background(), sampleRecord())
+	err := c.SubmitUsage(context.Background(), []UsageRecord{sampleRecord()})
 	if err == nil {
 		t.Fatal("expected error for 400 response")
 	}
@@ -181,7 +181,7 @@ func TestIngestClient_SubmitUsage_429IsTransient(t *testing.T) {
 
 	c := newIngestClientForTest(t, s.URL(), s.apiKey)
 
-	err := c.SubmitUsage(context.Background(), sampleRecord())
+	err := c.SubmitUsage(context.Background(), []UsageRecord{sampleRecord()})
 	if err == nil {
 		t.Fatal("expected error for 429 response")
 	}
@@ -194,7 +194,7 @@ func TestIngestClient_SubmitUsage_NetworkErrorIsTransient(t *testing.T) {
 	// Point the client at a server that refuses connections.
 	c := newIngestClientForTest(t, "http://127.0.0.1:1", "test-key")
 
-	err := c.SubmitUsage(context.Background(), sampleRecord())
+	err := c.SubmitUsage(context.Background(), []UsageRecord{sampleRecord()})
 	if err == nil {
 		t.Fatal("expected error for unreachable server")
 	}
@@ -212,7 +212,7 @@ func TestIngestClient_SubmitUsage_NoDimensionsOmitted(t *testing.T) {
 	rec := sampleRecord()
 	rec.Dimensions = nil
 
-	if err := c.SubmitUsage(context.Background(), rec); err != nil {
+	if err := c.SubmitUsage(context.Background(), []UsageRecord{rec}); err != nil {
 		t.Fatalf("SubmitUsage: %v", err)
 	}
 

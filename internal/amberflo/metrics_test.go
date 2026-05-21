@@ -44,7 +44,7 @@ func (s *stubClient) DeleteMeter(ctx context.Context, _ string) error { return s
 func (s *stubClient) GetMeter(ctx context.Context, _ string) (Meter, error) {
 	return Meter{}, s.getMeterErr
 }
-func (s *stubClient) SubmitUsage(ctx context.Context, _ UsageRecord) error { return nil }
+func (s *stubClient) SubmitUsage(ctx context.Context, _ []UsageRecord) error { return nil }
 
 func TestInstrumentedClient_DelegatesAndInstruments(t *testing.T) {
 	stub := &stubClient{}

@@ -250,7 +250,7 @@ func main() {
 			BillingAccountCache: baCache,
 			MeterCache:          meterCache,
 			Logger:              ctrl.Log.WithName("submission-consumer"),
-			FetchBatch:          1,
+			FetchBatch:          serverConfig.SubmissionBatchSize,
 		}
 		if addErr := mgr.Add(submissionConsumer); addErr != nil {
 			setupLog.Error(addErr, "unable to add submission consumer to manager")
