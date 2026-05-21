@@ -38,9 +38,6 @@ type UsageRecord struct {
 // wireUsageRecord is the JSON shape sent to the Amberflo ingest endpoint.
 // Field names follow Amberflo's camelCase API convention (consistent with
 // wireMeter in meter.go).
-//
-// REQUIRES SANDBOX CONFIRMATION: "meterValue" may be "ingestionValue".
-// Only the json tag needs changing — no logic change required.
 type wireUsageRecord struct {
 	CustomerID    string            `json:"customerId"`
 	MeterAPIName  string            `json:"meterApiName"`
