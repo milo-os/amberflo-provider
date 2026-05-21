@@ -31,10 +31,11 @@ import (
 // fakeMsg implements jetstream.Msg for testing processMessage without a
 // real NATS server.
 type fakeMsg struct {
-	data    []byte
-	subject string
-	acked   bool
-	naked   bool
+	data     []byte
+	subject  string
+	acked    bool
+	naked    bool
+	nakDelay time.Duration
 }
 
 func (m *fakeMsg) Metadata() (*jetstream.MsgMetadata, error) {
@@ -47,7 +48,7 @@ func (m *fakeMsg) Reply() string                      { return "" }
 func (m *fakeMsg) Ack() error                         { m.acked = true; return nil }
 func (m *fakeMsg) DoubleAck(_ context.Context) error  { m.acked = true; return nil }
 func (m *fakeMsg) Nak() error                         { m.naked = true; return nil }
-func (m *fakeMsg) NakWithDelay(_ time.Duration) error { m.naked = true; return nil }
+func (m *fakeMsg) NakWithDelay(d time.Duration) error { m.naked = true; m.nakDelay = d; return nil }
 func (m *fakeMsg) InProgress() error                  { return nil }
 func (m *fakeMsg) Term() error                        { return nil }
 func (m *fakeMsg) TermWithReason(_ string) error      { return nil }
@@ -103,6 +104,9 @@ func newTestConsumer(t *testing.T, ingestClient amberflo.IngestClient, meterCach
 		MeterCache:          meterCache,
 		Logger:              logr.Discard(),
 		FetchBatch:          1,
+		RetryAfter:          5 * time.Second,
+		AckWait:             30 * time.Second,
+		FetchTimeout:        5 * time.Second,
 	}
 }
 

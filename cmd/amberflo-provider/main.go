@@ -251,6 +251,9 @@ func main() {
 			MeterCache:          meterCache,
 			Logger:              ctrl.Log.WithName("submission-consumer"),
 			FetchBatch:          serverConfig.SubmissionBatchSize,
+			RetryAfter:          serverConfig.SubmissionRetryAfter.Duration,
+			AckWait:             serverConfig.SubmissionAckWait.Duration,
+			FetchTimeout:        serverConfig.SubmissionFetchTimeout.Duration,
 		}
 		if addErr := mgr.Add(submissionConsumer); addErr != nil {
 			setupLog.Error(addErr, "unable to add submission consumer to manager")

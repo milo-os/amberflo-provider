@@ -49,13 +49,6 @@ const (
 	// filterSubject matches all validated events across all projects.
 	filterSubject = "billing.usage.*.valid"
 
-	// ackWait is how long the server waits for an ack before redelivering.
-	ackWait = 30 * time.Second
-
-	// ConsumerFetchTimeout is the per-Fetch call timeout. Using 5 seconds
-	// keeps the consumer responsive to context cancellation.
-	ConsumerFetchTimeout = 5 * time.Second
-
 	// billingAccountRefExtension is the CloudEvent extension attribute
 	// name carrying the BillingAccount name set by the attribution stage.
 	billingAccountRefExtension = "billingaccountref"
@@ -101,6 +94,15 @@ type SubmissionConsumer struct {
 
 	// FetchBatch is the number of messages to fetch per pull. Defaults to 1.
 	FetchBatch int
+
+	// RetryAfter is the default duration to wait before retrying on transient errors.
+	RetryAfter time.Duration
+
+	// AckWait is the JetStream durable consumer's ack wait duration.
+	AckWait time.Duration
+
+	// FetchTimeout is the pull consumer Fetch call timeout.
+	FetchTimeout time.Duration
 }
 
 // Start implements manager.Runnable. It blocks until ctx is cancelled,
@@ -108,6 +110,15 @@ type SubmissionConsumer struct {
 func (c *SubmissionConsumer) Start(ctx context.Context) error {
 	if c.FetchBatch <= 0 {
 		c.FetchBatch = 1
+	}
+	if c.RetryAfter <= 0 {
+		c.RetryAfter = 5 * time.Second
+	}
+	if c.AckWait <= 0 {
+		c.AckWait = 30 * time.Second
+	}
+	if c.FetchTimeout <= 0 {
+		c.FetchTimeout = 5 * time.Second
 	}
 
 	// Wait for the informer cache to be populated so the BillingAccount and
@@ -127,7 +138,7 @@ func (c *SubmissionConsumer) Start(ctx context.Context) error {
 		AckPolicy:     jetstream.AckExplicitPolicy,
 		DeliverPolicy: jetstream.DeliverAllPolicy,
 		MaxAckPending: -1,
-		AckWait:       ackWait,
+		AckWait:       c.AckWait,
 	})
 	if err != nil {
 		return fmt.Errorf("submission consumer: create/update durable consumer %q: %w", durableConsumerName, err)
@@ -137,11 +148,14 @@ func (c *SubmissionConsumer) Start(ctx context.Context) error {
 		"stream", billingUsageStream,
 		"consumer", durableConsumerName,
 		"fetchBatch", c.FetchBatch,
+		"ackWait", c.AckWait,
+		"fetchTimeout", c.FetchTimeout,
+		"retryAfter", c.RetryAfter,
 	)
 
 	for ctx.Err() == nil {
 
-		msgs, err := cons.Fetch(c.FetchBatch, jetstream.FetchMaxWait(ConsumerFetchTimeout))
+		msgs, err := cons.Fetch(c.FetchBatch, jetstream.FetchMaxWait(c.FetchTimeout))
 		if err != nil {
 			// Fetch timeout is expected when the stream is idle; continue.
 			c.Logger.V(1).Info("fetch returned error (may be idle timeout)", "err", err)
@@ -159,9 +173,11 @@ func (c *SubmissionConsumer) Start(ctx context.Context) error {
 				if oldestTimestamp.IsZero() || meta.Timestamp.Before(oldestTimestamp) {
 					oldestTimestamp = meta.Timestamp
 				}
-				// Update the "age" gauge with the current message's duration in the stream.
-				setOldestUnsubmittedAge(time.Since(meta.Timestamp).Seconds())
 			}
+		}
+
+		if !oldestTimestamp.IsZero() {
+			setOldestUnsubmittedAge(time.Since(oldestTimestamp).Seconds())
 		}
 
 		if len(batchMsgs) > 0 {
@@ -301,8 +317,8 @@ func (c *SubmissionConsumer) processMessages(ctx context.Context, msgs []jetstre
 				}
 			} else {
 				// Transient validation error (e.g. cache miss)
-				if nakErr := msg.Nak(); nakErr != nil {
-					c.Logger.Error(nakErr, "failed to nack message", "subject", msg.Subject())
+				if nakErr := msg.NakWithDelay(c.RetryAfter); nakErr != nil {
+					c.Logger.Error(nakErr, "failed to nack message with delay", "subject", msg.Subject())
 				}
 			}
 			continue
@@ -360,8 +376,8 @@ func (c *SubmissionConsumer) processMessages(ctx context.Context, msgs []jetstre
 					"err", indivErr,
 				)
 				recordSubmission("transient")
-				if nakErr := msg.Nak(); nakErr != nil {
-					c.Logger.Error(nakErr, "failed to nack message on fallback", "subject", msg.Subject())
+				if nakErr := msg.NakWithDelay(c.RetryAfter); nakErr != nil {
+					c.Logger.Error(nakErr, "failed to nack message on fallback with delay", "subject", msg.Subject())
 				}
 			}
 		}
@@ -369,10 +385,10 @@ func (c *SubmissionConsumer) processMessages(ctx context.Context, msgs []jetstre
 	}
 
 	// Transient error on batch submission (e.g. network/503/429)
-	c.Logger.V(1).Info("transient Amberflo ingest error on batch; nacking all for retry", "err", submitErr)
+	c.Logger.V(1).Info("transient Amberflo ingest error on batch; nacking all for retry", "err", submitErr, "delay", c.RetryAfter)
 	for _, msg := range validatedMsgs {
 		recordSubmission("transient")
-		if nakErr := msg.Nak(); nakErr != nil {
+		if nakErr := msg.NakWithDelay(c.RetryAfter); nakErr != nil {
 			c.Logger.Error(nakErr, "failed to nack message", "subject", msg.Subject())
 		}
 	}

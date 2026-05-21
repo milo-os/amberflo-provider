@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -89,6 +90,16 @@ type AmberfloProvider struct {
 	// submit in a single batch to Amberflo. Defaults to 1.
 	SubmissionBatchSize int `json:"submissionBatchSize,omitempty"`
 
+	// SubmissionRetryAfter is the default duration to wait before retrying
+	// a failed transient submission or on cache miss. Defaults to 5s.
+	SubmissionRetryAfter metav1.Duration `json:"submissionRetryAfter,omitempty"`
+
+	// SubmissionAckWait is the durable consumer's ack wait duration. Defaults to 30s.
+	SubmissionAckWait metav1.Duration `json:"submissionAckWait,omitempty"`
+
+	// SubmissionFetchTimeout is the consumer pull batch fetch timeout. Defaults to 5s.
+	SubmissionFetchTimeout metav1.Duration `json:"submissionFetchTimeout,omitempty"`
+
 	// Nats configures the NATS JetStream connection for the
 	// submission consumer.
 	Nats NATSConfig `json:"nats"`
@@ -119,6 +130,15 @@ func SetDefaults_AmberfloProvider(obj *AmberfloProvider) {
 	}
 	if obj.SubmissionBatchSize == 0 {
 		obj.SubmissionBatchSize = 10
+	}
+	if obj.SubmissionRetryAfter.Duration == 0 {
+		obj.SubmissionRetryAfter.Duration = 5 * time.Second
+	}
+	if obj.SubmissionAckWait.Duration == 0 {
+		obj.SubmissionAckWait.Duration = 30 * time.Second
+	}
+	if obj.SubmissionFetchTimeout.Duration == 0 {
+		obj.SubmissionFetchTimeout.Duration = 5 * time.Second
 	}
 }
 
