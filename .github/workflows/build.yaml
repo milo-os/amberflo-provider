@@ -36,6 +36,6 @@ jobs:
     with:
       bundle-name: ghcr.io/milo-os/amberflo-provider-kustomize
       bundle-path: config
-      image-overlays: config/base/manager
+      image-overlays: config/base/manager,config/base/submission-consumer
       image-name: ghcr.io/milo-os/amberflo-provider
     secrets: inherit

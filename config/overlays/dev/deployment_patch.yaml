@@ -1,0 +1,13 @@
+# Dev overlay patches for the amberflo-provider Deployment. For M0 the
+# overlay is intentionally minimal; real dev wiring (kind-loaded image,
+# in-cluster fake Amberflo endpoint) lands with M4.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: amberflo-provider
+spec:
+  template:
+    spec:
+      containers:
+        - name: manager
+          imagePullPolicy: IfNotPresent

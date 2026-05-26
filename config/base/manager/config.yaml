@@ -6,3 +6,8 @@ amberfloBaseURL: https://app.amberflo.io
 amberfloAPIKeyPath: /var/run/secrets/amberflo/api-key
 amberfloRateLimitPerSec: 10
 allowCustomerDelete: false
+nats:
+  url: "tls://nats.nats-system.svc.cluster.local:4222"
+  caFile: "/etc/nats-certs/ca.crt"
+  certFile: "/etc/nats-certs/tls.crt"
+  keyFile: "/etc/nats-certs/tls.key"

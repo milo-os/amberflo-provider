@@ -94,12 +94,12 @@ tasks:
         echo "Manifests generated!"
 
   build:
-    desc: Build the amberflo-provider binary
+    desc: Build the amberflo-provider and submission-consumer binaries
     silent: true
     cmds:
       - |
         set -e
-        echo "Building amberflo-provider..."
+        echo "Building binaries..."
         mkdir -p {{.TOOL_DIR}}
 
         GIT_COMMIT=$(git rev-parse HEAD 2>/dev/null || echo "unknown")
@@ -119,6 +119,14 @@ tasks:
                     -X 'main.buildDate=${BUILD_DATE}'" \
           -o {{.TOOL_DIR}}/amberflo-provider ./cmd/amberflo-provider
         echo "Binary built: {{.TOOL_DIR}}/amberflo-provider"
+
+        go build \
+          -ldflags="-X 'main.version=${VERSION}' \
+                    -X 'main.gitCommit=${GIT_COMMIT}' \
+                    -X 'main.gitTreeState=${GIT_TREE_STATE}' \
+                    -X 'main.buildDate=${BUILD_DATE}'" \
+          -o {{.TOOL_DIR}}/submission-consumer ./cmd/submission-consumer
+        echo "Binary built: {{.TOOL_DIR}}/submission-consumer"
 
   test:
     desc: Run Go tests
@@ -201,6 +209,8 @@ tasks:
         echo "Redeploying amberflo-provider (dev)..."
         task test-infra:kubectl -- rollout restart -n amberflo-provider-system deployment/amberflo-provider || \
           echo "Deployment not found, run 'task dev:deploy' first"
+        task test-infra:kubectl -- rollout restart -n amberflo-provider-system deployment/submission-consumer || \
+          echo "Submission consumer deployment not found, run 'task dev:deploy' first"
 
   test:create-amberflo-credentials:
     desc: Create the amberflo-credentials Secret from AMBERFLO_API_KEY (.env).

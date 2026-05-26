@@ -41,8 +41,8 @@ const (
 	MeterFinalizer = "amberflo.miloapis.com/meter"
 
 	// Event reasons specific to the meter-definition reconciler.
-	EventReasonSyncSkipped = "SyncSkipped"
-	EventReasonDeleted     = "Deleted"
+	EventReasonSyncSkipped  = "SyncSkipped"
+	EventReasonDeleted      = "Deleted"
 	EventReasonDeleteFailed = "DeleteFailed"
 
 	// SyncSkipped reason tags surfaced in event messages.
