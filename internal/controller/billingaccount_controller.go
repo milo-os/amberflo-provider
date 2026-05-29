@@ -21,7 +21,7 @@ import (
 
 	"github.com/go-logr/logr"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -148,18 +148,9 @@ func (r *BillingAccountReconciler) Reconcile(ctx context.Context, req reconcile.
 	// stale. A full Update would PUT our stale spec back and strip
 	// such fields.
 	if !controllerutil.ContainsFinalizer(&account, CustomerLinkFinalizer) {
-		apply := &billingv1alpha1.BillingAccount{
-			TypeMeta: metav1.TypeMeta{
-				APIVersion: billingv1alpha1.GroupVersion.String(),
-				Kind:       "BillingAccount",
-			},
-			ObjectMeta: metav1.ObjectMeta{
-				Name:       account.Name,
-				Namespace:  account.Namespace,
-				Finalizers: []string{CustomerLinkFinalizer},
-			},
-		}
-		if err := r.Patch(ctx, apply, client.Apply,
+		if err := r.Patch(ctx,
+			finalizerApply(account.Name, account.Namespace, []string{CustomerLinkFinalizer}),
+			client.Apply,
 			client.FieldOwner(customerLinkFieldOwner),
 			client.ForceOwnership,
 		); err != nil {
@@ -280,22 +271,34 @@ func (r *BillingAccountReconciler) removeFinalizer(
 	ctx context.Context,
 	account *billingv1alpha1.BillingAccount,
 ) error {
-	apply := &billingv1alpha1.BillingAccount{
-		TypeMeta: metav1.TypeMeta{
-			APIVersion: billingv1alpha1.GroupVersion.String(),
-			Kind:       "BillingAccount",
-		},
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      account.Name,
-			Namespace: account.Namespace,
-		},
-	}
-	if err := r.Patch(ctx, apply, client.Apply,
+	if err := r.Patch(ctx,
+		finalizerApply(account.Name, account.Namespace, nil),
+		client.Apply,
 		client.FieldOwner(customerLinkFieldOwner),
 	); err != nil {
 		return fmt.Errorf("remove finalizer: %w", err)
 	}
 	return nil
+}
+
+// finalizerApply builds the minimal Server-Side Apply payload that
+// claims (or relinquishes) ownership of metadata.finalizers without
+// declaring any spec fields. The typed BillingAccount struct cannot
+// be used directly here: encoding/json serializes the zero-value
+// Spec as `spec: {currencyCode: ""}` even with `omitempty`, and CRD
+// validation rejects the empty currencyCode regardless of whether we
+// intend to own that field. The unstructured payload omits spec
+// entirely.
+//
+// Pass a nil or empty `finalizers` slice on the remove path to
+// release ownership of the entry under our field manager.
+func finalizerApply(name, namespace string, finalizers []string) *unstructured.Unstructured {
+	u := &unstructured.Unstructured{}
+	u.SetGroupVersionKind(billingv1alpha1.GroupVersion.WithKind("BillingAccount"))
+	u.SetName(name)
+	u.SetNamespace(namespace)
+	u.SetFinalizers(finalizers)
+	return u
 }
 
 // handleAmberfloError turns a failed EnsureCustomer into an event and the
