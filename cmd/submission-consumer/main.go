@@ -117,7 +117,17 @@ func main() {
 		os.Exit(1)
 	}
 
-	metricsServerOptions := serverConfig.MetricsServer.Options(ctx, bootstrapClient)
+	// The metrics endpoint's authn/authz filter must validate scrape
+	// requests against the LOCAL cluster (where the scraper and this pod
+	// live), not the Milo control plane that `cfg` may point at. Resolve
+	// the local config via the standard in-cluster / KUBECONFIG resolution.
+	metricsAuthConfig, err := ctrl.GetConfig()
+	if err != nil {
+		setupLog.Error(err, "unable to load local rest config for metrics auth")
+		os.Exit(1)
+	}
+
+	metricsServerOptions := serverConfig.MetricsServer.Options(ctx, bootstrapClient, metricsAuthConfig)
 
 	mgr, err := ctrl.NewManager(cfg, ctrl.Options{
 		Scheme:                 scheme,

@@ -17,6 +17,7 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"time"
@@ -212,7 +213,21 @@ func SetDefaults_MetricsServerConfig(obj *MetricsServerConfig) {
 	}
 }
 
-func (c *MetricsServerConfig) Options(ctx context.Context, secretsClient client.Client) metricsserver.Options {
+// Options builds the controller-runtime metrics server options.
+//
+// authConfig is the rest.Config used by the metrics endpoint's
+// authentication/authorization filter to run TokenReview and
+// SubjectAccessReview. It must point at the cluster where the metrics
+// scraper (e.g. vmagent) lives — i.e. the local/in-cluster apiserver —
+// NOT the manager's client config, which targets the Milo control plane.
+// The scraper authenticates with a local-cluster ServiceAccount token, so
+// sending TokenReview to Milo fails with "jwt token is not active" because
+// Milo cannot validate a token it did not issue.
+//
+// When authConfig is nil (single-cluster deployments where the manager
+// already targets the local cluster) the filter falls back to the config
+// the metrics server passes in.
+func (c *MetricsServerConfig) Options(ctx context.Context, secretsClient client.Client, authConfig *rest.Config) metricsserver.Options {
 	secureServing := c.SecureServing != nil && *c.SecureServing
 
 	opts := metricsserver.Options{
@@ -224,7 +239,17 @@ func (c *MetricsServerConfig) Options(ctx context.Context, secretsClient client.
 	}
 
 	if secureServing {
-		opts.FilterProvider = filters.WithAuthenticationAndAuthorization
+		if authConfig != nil {
+			opts.FilterProvider = func(_ *rest.Config, _ *http.Client) (metricsserver.Filter, error) {
+				httpClient, err := rest.HTTPClientFor(authConfig)
+				if err != nil {
+					return nil, err
+				}
+				return filters.WithAuthenticationAndAuthorization(authConfig, httpClient)
+			}
+		} else {
+			opts.FilterProvider = filters.WithAuthenticationAndAuthorization
+		}
 	}
 
 	if secretRef := c.TLS.SecretRef; secretRef != nil {
