@@ -21,6 +21,7 @@ import (
 
 	"github.com/go-logr/logr"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -41,6 +42,13 @@ const (
 	// adds the force-delete annotation below). The name is preserved from
 	// the status-CRD era for operator-facing backwards compatibility.
 	CustomerLinkFinalizer = "amberflo.providers.datum.net/customer-link"
+
+	// customerLinkFieldOwner is the field manager name used by this
+	// reconciler when it server-side-applies finalizer changes. SSA
+	// scopes our writes to the fields we declare in the apply payload,
+	// so other managers' writes to spec / status / other finalizers
+	// stay intact even when our local copy is stale.
+	customerLinkFieldOwner = "amberflo-provider"
 
 	// ForceDeleteAnnotation, when present on a BillingAccount being deleted,
 	// removes CustomerLinkFinalizer even if the Amberflo disable call fails.
@@ -133,10 +141,28 @@ func (r *BillingAccountReconciler) Reconcile(ctx context.Context, req reconcile.
 	}
 
 	// Ensure the finalizer is attached before we touch Amberflo so we
-	// never create a customer we cannot clean up.
+	// never create a customer we cannot clean up. Server-Side Apply
+	// scopes ownership to metadata.finalizers; other managers' writes
+	// to spec (e.g. contactInfo.invoiceEmails set by the portal at
+	// create time) stay intact even when our cached account.Spec is
+	// stale. A full Update would PUT our stale spec back and strip
+	// such fields.
 	if !controllerutil.ContainsFinalizer(&account, CustomerLinkFinalizer) {
-		controllerutil.AddFinalizer(&account, CustomerLinkFinalizer)
-		if err := r.Update(ctx, &account); err != nil {
+		apply := &billingv1alpha1.BillingAccount{
+			TypeMeta: metav1.TypeMeta{
+				APIVersion: billingv1alpha1.GroupVersion.String(),
+				Kind:       "BillingAccount",
+			},
+			ObjectMeta: metav1.ObjectMeta{
+				Name:       account.Name,
+				Namespace:  account.Namespace,
+				Finalizers: []string{CustomerLinkFinalizer},
+			},
+		}
+		if err := r.Patch(ctx, apply, client.Apply,
+			client.FieldOwner(customerLinkFieldOwner),
+			client.ForceOwnership,
+		); err != nil {
 			reconcileErr = fmt.Errorf("add finalizer: %w", err)
 			return ctrl.Result{}, reconcileErr
 		}
@@ -245,14 +271,28 @@ func (r *BillingAccountReconciler) reconcileDelete(
 	return ctrl.Result{}, nil
 }
 
-// removeFinalizer drops the customer-link finalizer and updates the object.
-// Splits out for readability in the two delete-path branches.
+// removeFinalizer drops the customer-link finalizer via Server-Side
+// Apply: re-apply with an empty finalizers list under our field owner.
+// The apiserver drops our claim on the entry while leaving other
+// managers' finalizers alone, and the surrounding spec is untouched —
+// see the comment on the Add path above.
 func (r *BillingAccountReconciler) removeFinalizer(
 	ctx context.Context,
 	account *billingv1alpha1.BillingAccount,
 ) error {
-	controllerutil.RemoveFinalizer(account, CustomerLinkFinalizer)
-	if err := r.Update(ctx, account); err != nil {
+	apply := &billingv1alpha1.BillingAccount{
+		TypeMeta: metav1.TypeMeta{
+			APIVersion: billingv1alpha1.GroupVersion.String(),
+			Kind:       "BillingAccount",
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      account.Name,
+			Namespace: account.Namespace,
+		},
+	}
+	if err := r.Patch(ctx, apply, client.Apply,
+		client.FieldOwner(customerLinkFieldOwner),
+	); err != nil {
 		return fmt.Errorf("remove finalizer: %w", err)
 	}
 	return nil
