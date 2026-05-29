@@ -39,8 +39,8 @@ spec:
           image: ghcr.io/milo-os/amberflo-provider:dev
           name: submission-consumer
           ports:
-            - containerPort: 8080
-              name: metrics
+            - containerPort: 8443
+              name: https
               protocol: TCP
           securityContext:
             allowPrivilegeEscalation: false

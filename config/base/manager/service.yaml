@@ -3,14 +3,15 @@ kind: Service
 metadata:
   name: amberflo-provider-metrics
   labels:
+    control-plane: amberflo-provider
     app.kubernetes.io/name: amberflo-provider
     app.kubernetes.io/managed-by: kustomize
 spec:
   ports:
-    - name: metrics
-      port: 8080
+    - name: https
+      port: 8443
       protocol: TCP
-      targetPort: metrics
+      targetPort: https
   selector:
     control-plane: amberflo-provider
     app.kubernetes.io/name: amberflo-provider

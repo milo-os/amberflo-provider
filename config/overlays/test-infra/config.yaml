@@ -1,7 +1,7 @@
 apiVersion: config.amberflo.providers.datum.net/v1alpha1
 kind: AmberfloProvider
 metricsServer:
-  bindAddress: "0"
+  bindAddress: ":8443"
 # Single-cluster test-infra deployment: billing CRDs and the provider
 # controller share one kube-apiserver, so kubeconfigPath is empty
 # and controller-runtime uses the pod's in-cluster service account.
