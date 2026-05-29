@@ -1,0 +1,99 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: amberflo-provider-alerts
+  labels:
+    alert-group: amberflo-provider
+    app.kubernetes.io/name: amberflo-provider
+    app.kubernetes.io/managed-by: kustomize
+spec:
+  groups:
+    - name: amberflo-provider.pods
+      rules:
+        - alert: AmberfloProviderPodCrashLooping
+          expr: |
+            kube_pod_container_status_waiting_reason{
+              job="kube-state-metrics",
+              namespace="amberflo-provider-system",
+              pod=~"amberflo-provider-.*|submission-consumer-.*",
+              reason="CrashLoopBackOff"
+            } > 0
+          for: 5m
+          labels:
+            severity: critical
+            namespace: amberflo-provider-system
+            service: amberflo-provider
+          annotations:
+            summary: "Pod {{ $labels.pod }} is crash-looping"
+            description: |
+              Container {{ $labels.container }} in pod
+              {{ $labels.namespace }}/{{ $labels.pod }} has been in
+              CrashLoopBackOff for 5 minutes. Check logs:
+              kubectl logs -n {{ $labels.namespace }} {{ $labels.pod }} -c {{ $labels.container }} --previous
+
+        - alert: AmberfloProviderDeploymentUnavailable
+          expr: |
+            kube_deployment_status_replicas_unavailable{
+              job="kube-state-metrics",
+              namespace="amberflo-provider-system",
+              deployment=~"amberflo-provider|submission-consumer"
+            } > 0
+          for: 5m
+          labels:
+            severity: critical
+            namespace: amberflo-provider-system
+            service: amberflo-provider
+          annotations:
+            summary: "Deployment {{ $labels.deployment }} has unavailable replicas"
+            description: |
+              {{ $value }} replica(s) in deployment
+              {{ $labels.namespace }}/{{ $labels.deployment }} have been
+              unavailable for 5 minutes.
+
+    - name: amberflo-provider.submission
+      rules:
+        - alert: SubmissionConsumerPipelineStalled
+          expr: |
+            billing_pipeline_oldest_unsubmitted_seconds{
+              namespace="amberflo-provider-system"
+            } > 0
+          for: 5m
+          labels:
+            severity: warning
+            namespace: amberflo-provider-system
+            service: amberflo-provider
+          annotations:
+            summary: "Submission consumer pipeline has stalled"
+            description: |
+              The submission consumer has had unacknowledged events in flight
+              for over 5 minutes (current age: {{ $value }}s). This indicates
+              the consumer is unable to successfully submit to Amberflo. Check
+              for transient API errors or NATS connectivity issues:
+              kubectl logs -n amberflo-provider-system deployment/submission-consumer
+
+        - alert: SubmissionConsumerHighErrorRate
+          expr: |
+            sum by (namespace) (
+              rate(billing_submission_requests_total{
+                namespace="amberflo-provider-system",
+                status=~"transient|permanent"
+              }[5m])
+            )
+            /
+            sum by (namespace) (
+              rate(billing_submission_requests_total{
+                namespace="amberflo-provider-system"
+              }[5m])
+            ) > 0.1
+          for: 10m
+          labels:
+            severity: warning
+            namespace: amberflo-provider-system
+            service: amberflo-provider
+          annotations:
+            summary: "Submission consumer error rate above 10%"
+            description: |
+              More than 10% of Amberflo ingest submissions have been failing
+              (transient or permanent) over the last 5 minutes. Permanent
+              failures mean billing events are being dropped. Check the
+              Amberflo API key, rate limits, and event payload validity.
