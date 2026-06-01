@@ -1,7 +1,7 @@
 apiVersion: config.amberflo.providers.datum.net/v1alpha1
 kind: AmberfloProvider
 metricsServer:
-  bindAddress: "0"
+  bindAddress: ":8443"
 amberfloBaseURL: https://app.amberflo.io
 amberfloAPIKeyPath: /var/run/secrets/amberflo/api-key
 amberfloRateLimitPerSec: 10
