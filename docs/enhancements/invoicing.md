@@ -12,7 +12,6 @@ latest-milestone: "v0"
   - [Goals](#goals)
   - [Non-Goals](#non-goals)
 - [Proposal](#proposal)
-  - [Config Changes](#config-changes)
   - [Stripe Customer ID Sync](#stripe-customer-id-sync)
   - [Invoice Webhook Receiver](#invoice-webhook-receiver)
   - [Invoice Reconciliation Fallback](#invoice-reconciliation-fallback)
@@ -21,7 +20,7 @@ latest-milestone: "v0"
 - [Future Work](#future-work)
 - [Alternatives](#alternatives)
   - [Poll Amberflo's Invoice API Only](#poll-amberflos-invoice-api-only)
-  - [New AmberfloProviderConfig CRD for Webhook Settings](#new-amberfloproviderconfig-crd-for-webhook-settings)
+  - [A Kubernetes CRD for Provider Configuration](#a-kubernetes-crd-for-provider-configuration)
 - [References](#references)
 
 ## Summary
@@ -66,50 +65,26 @@ once it computes an invoice.
 
 ## Proposal
 
-### Config Changes
-
-`AmberfloProvider` (`internal/config/config.go`) gains an `InvoiceWebhook`
-section:
-
-```yaml
-invoiceWebhook:
-  bindAddress: ":8443"                # HTTP listener for Amberflo's invoice webhooks
-  path: "/webhooks/amberflo/invoices"
-  signingSecretPath: /var/run/secrets/amberflo/webhook-signing-secret
-```
-
-This extends the provider's existing flat config file rather than
-introducing a new CRD — the same pattern already used for
-`AmberfloAPIKeyPath` (a Secret-mounted file, not a Kubernetes object). See
-[New AmberfloProviderConfig CRD for Webhook Settings](#new-amberfloproviderconfig-crd-for-webhook-settings)
-for why a CRD isn't introduced here.
-
 ### Stripe Customer ID Sync
 
-`DesiredCustomer` (`internal/amberflo/customer.go`) gains a
-`StripeCustomerID` field, encoded as a new reserved trait (`stripeId`)
-alongside the existing `currencyCode` and `payment.*` traits.
-
-The billing account controller
-(`internal/controller/billingaccount_controller.go`) resolves it via:
+The controller resolves a `BillingAccount`'s Stripe customer id —
 `BillingAccount.spec.defaultPaymentMethodRef` → `PaymentMethod` (must be
-`Active`) → `StripePaymentMethod.status.stripeCustomerId` — read-only RBAC
-scoped to that one field, matching the narrow exception documented in
+`Active`) → `StripePaymentMethod.status.stripeCustomerId` — and syncs it
+onto the matching Amberflo customer record, read-only RBAC scoped to that
+one field, matching the narrow exception documented in
 [milo-os/billing][billing-invoicing]'s Cross-Provider Identity Resolution.
 
-The lookup only runs once `BillingAccount.status.DefaultPaymentMethodReady`
-is `True`. Until then, `stripeId` stays unset, Amberflo has nothing to
-charge against, and any `Invoice` created in the meantime surfaces
-`PastDue`.
+The sync only runs once `BillingAccount.status.DefaultPaymentMethodReady` is
+`True`. Until then, Amberflo has nothing to charge against, and any
+`Invoice` created in the meantime surfaces `PastDue`.
 
 ### Invoice Webhook Receiver
 
-A new HTTP handler, registered on the `invoiceWebhook` listener, receives
-Amberflo's `ready-product-invoices` event (and its payment-status-changed
-equivalent). On receipt:
+A new webhook receiver handles Amberflo's `ready-product-invoices` event
+(and its payment-status-changed equivalent). On receipt:
 
-1. Verify the request against the configured signing secret; reject
-   unverified requests.
+1. Verify the request came from Amberflo; reject anything that doesn't
+   verify.
 2. Extract the Amberflo customer id (== `BillingAccount` name) and invoice
    id from the payload.
 3. Fetch full invoice detail from Amberflo's invoice API.
@@ -125,10 +100,10 @@ the existing `Invoice`.
 ### Invoice Reconciliation Fallback
 
 The generic contract doesn't require the webhook to be the only detection
-mechanism. The billing account controller also checks Amberflo's
-invoice-list API for the customer on its normal reconcile loop, using the
-same create/update path as the webhook handler — a missed webhook delivery
-self-heals on the next reconcile instead of leaving `Invoice` stale.
+mechanism. The controller also checks Amberflo's invoice-list API for the
+customer on its normal reconcile loop, using the same create/update path as
+the webhook handler — a missed webhook delivery self-heals on the next
+reconcile instead of leaving `Invoice` stale.
 
 ### RBAC
 
@@ -154,8 +129,7 @@ Amberflo attempt to charge against nothing. The
 
 - Tuning the reconcile-loop polling cadence once real invoice volume is
   known.
-- Metrics and alerting on webhook delivery and invoice-fetch failures,
-  following the existing `internal/*/metrics.go` pattern.
+- Metrics and alerting on webhook delivery and invoice-fetch failures.
 - Handling Amberflo invoice voids and credits, once that becomes a real
   scenario.
 
@@ -169,16 +143,14 @@ invoice and payment status updates lag by up to that interval. The webhook
 gives near-real-time updates without extra Amberflo API calls; polling
 stays as a fallback, not the primary path.
 
-### New AmberfloProviderConfig CRD for Webhook Settings
+### A Kubernetes CRD for Provider Configuration
 
 Considered introducing a Kubernetes CRD for the provider's own
 configuration, matching the generic contract's assumption that provider
-config lives in a CRD. Rejected: the provider's config today is a flat file
-mounted from a Secret/ConfigMap (`AmberfloProvider` in
-`internal/config/config.go`), not a CR. Introducing a CRD for just this one
-integration would split the provider's configuration across two mechanisms
-for no real benefit — extending the existing config file keeps it in one
-place.
+config lives in a CRD. Rejected: the provider's configuration today is
+file/Secret-based, not a Kubernetes object. Introducing a CRD for just this
+one integration would split configuration across two mechanisms for no
+real benefit.
 
 ## References
 
