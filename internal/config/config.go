@@ -88,7 +88,11 @@ type AmberfloProvider struct {
 	AllowCustomerDelete bool `json:"allowCustomerDelete,omitempty"`
 
 	// SubmissionBatchSize is the number of events to pull from NATS and
-	// submit in a single batch to Amberflo. Defaults to 1.
+	// submit in a single batch to Amberflo. Defaults to 10. Combined with
+	// AmberfloRateLimitPerSec this determines the consumer's sustained
+	// ingest throughput ceiling (rate limit x batch size events/sec) --
+	// raise it if the pipeline is falling behind actual usage-event
+	// volume.
 	SubmissionBatchSize int `json:"submissionBatchSize,omitempty"`
 
 	// SubmissionRetryAfter is the default duration to wait before retrying
