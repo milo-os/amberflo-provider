@@ -26,27 +26,22 @@ latest-milestone: "v0"
 
 ## Summary
 
-Today, `amberflo-provider` only syncs `BillingAccount` into an Amberflo
-`Customer` and streams usage events — it doesn't touch invoicing or payment
-at all. Nobody outside Amberflo's own dashboard can tell whether a billing
-account is current, and nothing links the Stripe customer already collected
-by `stripe-provider` to the Amberflo customer that will actually compute and
-collect on invoices.
-
 [milo-os/billing][billing-invoicing] defines the vendor-agnostic `Invoice`
 contract every invoicing provider follows. This enhancement is Amberflo's
-implementation of that contract: how `amberflo-provider` links a
+implementation of that contract: `amberflo-provider` links a
 `BillingAccount` to Stripe through Amberflo, learns when Amberflo has
-computed an invoice, and keeps `Invoice` in sync as payment status changes.
+computed an invoice, and keeps `Invoice` in sync as payment status changes —
+so account owners, support, and finance can tell whether an account is
+current without ever touching Amberflo directly.
 
 ## Motivation
 
 The platform decided Amberflo will own invoice generation and charging
 directly through its native Stripe integration, rather than driving charges
-through `stripe-provider` itself. That decision only pays off once
-`amberflo-provider` actually implements it — right now the provider has no
-path from "a billing account has a payment method" to "Amberflo can charge
-it," and no path from "Amberflo closed a billing cycle" back to Milo.
+through `stripe-provider` itself. Implementing that requires two new links:
+a `BillingAccount`'s Stripe customer id has to reach Amberflo before it can
+charge anything, and Amberflo's own billing-cycle outcome has to reach Milo
+once it computes an invoice.
 
 ### Goals
 
