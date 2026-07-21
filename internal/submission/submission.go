@@ -92,7 +92,9 @@ type SubmissionConsumer struct {
 	// Logger is the structured logger.
 	Logger logr.Logger
 
-	// FetchBatch is the number of messages to fetch per pull. Defaults to 1.
+	// FetchBatch is the number of messages to fetch per pull. Populated
+	// from AmberfloProvider.SubmissionBatchSize (defaults to 10); this
+	// field's own fallback of 1 only applies if a caller leaves it unset.
 	FetchBatch int
 
 	// RetryAfter is the default duration to wait before retrying on transient errors.
