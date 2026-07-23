@@ -78,6 +78,15 @@ The sync only runs once `BillingAccount.status.DefaultPaymentMethodReady` is
 `True`. Until then, Amberflo has nothing to charge against, and any
 `Invoice` created in the meantime surfaces `PastDue`.
 
+> [!IMPORTANT]
+> Syncing the Stripe id alone isn't enough for Amberflo to charge against it
+> immediately. Per Amberflo, a payment method change only takes effect at the
+> start of the customer's next billing period unless it's explicitly
+> scheduled to the start of the *current* one. The sync must set that
+> effective-date field to the current period's start, or a customer's first
+> invoice after linking payment will compute correctly but have nothing to
+> charge against.
+
 ### Invoice Webhook Receiver
 
 A new webhook receiver handles Amberflo's `ready-product-invoices` event
@@ -93,6 +102,17 @@ A new webhook receiver handles Amberflo's `ready-product-invoices` event
    normalizing Amberflo's invoice status into `phase`
    (`Open`/`Paid`/`PastDue`/`Void`), and recording Amberflo's own invoice id
    under the `amberflo.billing.miloapis.com/invoiceKey` annotation.
+
+> [!WARNING]
+> Amberflo's invoice status is a single string field, not the four-value
+> `phase` enum this doc assumed while drafting. Sandbox testing only
+> confirmed one value in the wild (`price_locked`, observed on a
+> flat-fee-plan invoice via `POST /integration/accounting/csv/invoice`) —
+> the full vocabulary Amberflo actually emits (and which values map to
+> `Paid` vs `PastDue` vs `Void`) is still unconfirmed. Get the complete
+> status list from Amberflo (support or their
+> [invoicing and billing docs][amberflo-invoicing-billing]) before
+> implementing the normalization logic in step 4.
 
 A payment-status-changed event reuses the same create/update path against
 the existing `Invoice`.
@@ -157,3 +177,4 @@ real benefit.
 [billing-invoicing]: https://github.com/milo-os/billing/blob/main/docs/enhancements/invoicing.md
 [payment-methods]: https://github.com/milo-os/billing/blob/main/docs/enhancements/payment-methods.md
 [amberflo-docs]: https://docs.amberflo.io/
+[amberflo-invoicing-billing]: https://enterprise-reference.amberflo.io/docs/invoicing-and-billing2
