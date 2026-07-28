@@ -31,8 +31,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
 	billingv1alpha1 "go.miloapis.com/billing/api/v1alpha1"
+	stripev1alpha1 "go.miloapis.com/stripe-provider/api/v1alpha1"
 
 	"go.miloapis.com/amberflo-provider/internal/amberflo"
+	"go.miloapis.com/amberflo-provider/internal/invoice"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -43,11 +45,20 @@ import (
 // module via `go list`, so it works both when the module is fetched from
 // the proxy and when it is replaced by a local checkout.
 func billingCRDPath() string {
-	out, err := exec.Command("go", "list", "-m", "-f", "{{.Dir}}", "go.miloapis.com/billing").Output()
-	Expect(err).NotTo(HaveOccurred(), "failed to resolve go.miloapis.com/billing module path")
+	return moduleCRDPath("go.miloapis.com/billing", "config", "base", "crd", "bases")
+}
+
+// stripeCRDPath returns the directory containing stripe-provider CRD bases.
+func stripeCRDPath() string {
+	return moduleCRDPath("go.miloapis.com/stripe-provider", "config", "base", "crd", "bases")
+}
+
+func moduleCRDPath(module string, parts ...string) string {
+	out, err := exec.Command("go", "list", "-m", "-f", "{{.Dir}}", module).Output()
+	Expect(err).NotTo(HaveOccurred(), "failed to resolve %s module path", module)
 	dir := strings.TrimSpace(string(out))
 	Expect(dir).NotTo(BeEmpty())
-	return filepath.Join(dir, "config", "base", "crd", "bases")
+	return filepath.Join(append([]string{dir}, parts...)...)
 }
 
 // Globals shared across tests. envtest bootstraps exactly one apiserver
@@ -86,11 +97,12 @@ var _ = BeforeSuite(func() {
 	By("bootstrapping test environment")
 	testEnv = &envtest.Environment{
 		CRDDirectoryPaths: []string{
-			// Milo's BillingAccount + BillingAccountBinding + MeterDefinition CRDs.
+			// Milo's BillingAccount + BillingAccountBinding + MeterDefinition + Invoice CRDs.
 			// We resolve the billing module path dynamically so the same
 			// suite works against both a sibling checkout (via go.mod
 			// replace) and a module-cache copy fetched from the proxy.
 			billingCRDPath(),
+			stripeCRDPath(),
 		},
 		ErrorIfCRDPathMissing: true,
 	}
@@ -101,6 +113,7 @@ var _ = BeforeSuite(func() {
 	Expect(cfg).NotTo(BeNil())
 
 	Expect(billingv1alpha1.AddToScheme(scheme.Scheme)).To(Succeed())
+	Expect(stripev1alpha1.AddToScheme(scheme.Scheme)).To(Succeed())
 
 	k8sClient, err = client.New(cfg, client.Options{Scheme: scheme.Scheme})
 	Expect(err).NotTo(HaveOccurred())
@@ -135,6 +148,7 @@ var _ = BeforeSuite(func() {
 		Client:         mgr.GetClient(),
 		AmberfloClient: amberfloClient,
 		Recorder:       fakeRecorder,
+		InvoiceSyncer:  &invoice.Syncer{Client: mgr.GetClient()},
 	}
 	Expect(reconciler.SetupWithManager(mgr)).To(Succeed())
 

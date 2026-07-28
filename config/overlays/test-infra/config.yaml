@@ -2,12 +2,15 @@ apiVersion: config.amberflo.providers.datum.net/v1alpha1
 kind: AmberfloProvider
 metricsServer:
   bindAddress: ":8443"
+webhookServer:
+  port: 9443
 # Single-cluster test-infra deployment: billing CRDs and the provider
 # controller share one kube-apiserver, so kubeconfigPath is empty
 # and controller-runtime uses the pod's in-cluster service account.
 kubeconfigPath: ""
 amberfloBaseURL: https://app.amberflo.io
 amberfloAPIKeyPath: /var/run/secrets/amberflo/api-key
+amberfloWebhookSigningSecretPath: /var/run/secrets/amberflo/webhook-signing-secret
 amberfloRateLimitPerSec: 50
 allowCustomerDelete: false
 nats:

@@ -33,6 +33,10 @@ var ErrCustomerNotFound = errors.New("amberflo: customer not found")
 // DeleteMeter treats it as success.
 var ErrMeterNotFound = errors.New("amberflo: meter not found")
 
+// ErrInvoiceNotFound is the sentinel returned by GetLatestInvoice when
+// Amberflo has no invoice for the requested customer.
+var ErrInvoiceNotFound = errors.New("amberflo: invoice not found")
+
 // TransientError wraps a failure that the caller should retry with
 // backoff. Network errors, 429s, and 5xx responses all surface as
 // TransientError.

@@ -45,6 +45,24 @@ func (s *stubClient) GetMeter(ctx context.Context, _ string) (Meter, error) {
 	return Meter{}, s.getMeterErr
 }
 func (s *stubClient) SubmitUsage(ctx context.Context, _ []UsageRecord) error { return nil }
+func (s *stubClient) ListInvoices(ctx context.Context, _ string) ([]CustomerProductInvoice, error) {
+	return nil, nil
+}
+func (s *stubClient) GetInvoice(ctx context.Context, _ InvoiceKey) (CustomerProductInvoice, error) {
+	return CustomerProductInvoice{}, nil
+}
+func (s *stubClient) GetLatestInvoice(ctx context.Context, _ string) (CustomerProductInvoice, error) {
+	return CustomerProductInvoice{}, nil
+}
+func (s *stubClient) ListPaymentSettings(ctx context.Context) ([]PaymentSetting, error) {
+	return nil, nil
+}
+func (s *stubClient) ListPaymentMethodSwitches(ctx context.Context, _ string) ([]PaymentMethodSwitch, error) {
+	return nil, nil
+}
+func (s *stubClient) SchedulePaymentMethodSwitch(ctx context.Context, sw PaymentMethodSwitch) (PaymentMethodSwitch, error) {
+	return sw, nil
+}
 
 func TestInstrumentedClient_DelegatesAndInstruments(t *testing.T) {
 	stub := &stubClient{}

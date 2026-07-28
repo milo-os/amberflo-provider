@@ -2,8 +2,11 @@ apiVersion: config.amberflo.providers.datum.net/v1alpha1
 kind: AmberfloProvider
 metricsServer:
   bindAddress: ":8443"
+webhookServer:
+  port: 9443
 amberfloBaseURL: https://app.amberflo.io
 amberfloAPIKeyPath: /var/run/secrets/amberflo/api-key
+amberfloWebhookSigningSecretPath: /var/run/secrets/amberflo/webhook-signing-secret
 amberfloRateLimitPerSec: 10
 allowCustomerDelete: false
 nats:

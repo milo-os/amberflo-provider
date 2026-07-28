@@ -15,6 +15,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"time"
@@ -32,8 +33,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	billingv1alpha1 "go.miloapis.com/billing/api/v1alpha1"
+	stripev1alpha1 "go.miloapis.com/stripe-provider/api/v1alpha1"
 
 	"go.miloapis.com/amberflo-provider/internal/amberflo"
+	"go.miloapis.com/amberflo-provider/internal/invoice"
 )
 
 const (
@@ -101,6 +104,17 @@ type BillingAccountReconciler struct {
 	// remains reserved for a future operator-guardrail flow.
 	AllowCustomerDelete bool
 
+	// InvoiceSyncer upserts Milo Invoice resources from Amberflo invoice
+	// data. Shared with the webhook handler. When nil, invoice fallback
+	// sync is skipped (tests that do not exercise invoicing).
+	InvoiceSyncer *invoice.Syncer
+
+	// StripePaymentSettingID optionally pins the Amberflo payment-settings
+	// id used as targetPaymentId when scheduling a Stripe payment-method
+	// switch. When empty, the reconciler picks the first setting whose
+	// billingSystem matches Stripe.
+	StripePaymentSettingID string
+
 	// Log is the reconciler-scoped logger. Each Reconcile call derives a
 	// per-reconcile logger with account/namespace/customerID values.
 	Log logr.Logger
@@ -109,6 +123,10 @@ type BillingAccountReconciler struct {
 // +kubebuilder:rbac:groups=billing.miloapis.com,resources=billingaccounts,verbs=get;list;watch;update;patch
 // +kubebuilder:rbac:groups=billing.miloapis.com,resources=billingaccounts/finalizers,verbs=update
 // +kubebuilder:rbac:groups=billing.miloapis.com,resources=billingaccountbindings,verbs=get;list;watch
+// +kubebuilder:rbac:groups=billing.miloapis.com,resources=invoices,verbs=get;list;watch;create;update;patch
+// +kubebuilder:rbac:groups=billing.miloapis.com,resources=invoices/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=billing.miloapis.com,resources=paymentmethods,verbs=get;list;watch
+// +kubebuilder:rbac:groups=stripe.billing.miloapis.com,resources=stripepaymentmethods,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=events,verbs=create;patch
 
 // Reconcile runs a single sync iteration for a BillingAccount.
@@ -148,9 +166,10 @@ func (r *BillingAccountReconciler) Reconcile(ctx context.Context, req reconcile.
 	// stale. A full Update would PUT our stale spec back and strip
 	// such fields.
 	if !controllerutil.ContainsFinalizer(&account, CustomerLinkFinalizer) {
-		if err := r.Patch(ctx,
-			finalizerApply(account.Name, account.Namespace, []string{CustomerLinkFinalizer}),
-			client.Apply,
+		if err := r.Apply(ctx,
+			client.ApplyConfigurationFromUnstructured(
+				finalizerApply(account.Name, account.Namespace, []string{CustomerLinkFinalizer}),
+			),
 			client.FieldOwner(customerLinkFieldOwner),
 			client.ForceOwnership,
 		); err != nil {
@@ -173,15 +192,110 @@ func (r *BillingAccountReconciler) Reconcile(ctx context.Context, req reconcile.
 	desired := desiredCustomerFromAccount(&account, projects)
 	logger = logger.WithValues("customerID", desired.ID)
 
+	stripeCustomerID, err := r.resolveStripeCustomerID(ctx, &account)
+	if err != nil {
+		reconcileErr = fmt.Errorf("resolve stripe customer id: %w", err)
+		return ctrl.Result{}, reconcileErr
+	}
+	if stripeCustomerID != "" {
+		desired.ExtraTraits = stripeExtraTraitsForAccount(stripeCustomerID)
+		logger.V(1).Info("attaching Stripe traits to Amberflo customer",
+			"stripeCustomerId", stripeCustomerID,
+		)
+	} else {
+		// Preserve previously synced Stripe traits so a Ready flap / SPM
+		// lag does not strip stripeid on the next EnsureCustomer PUT.
+		existing, getErr := r.AmberfloClient.GetCustomer(ctx, desired.ID)
+		switch {
+		case getErr == nil:
+			desired.ExtraTraits = stripeTraitsFromExisting(existing.Traits)
+		case errors.Is(getErr, amberflo.ErrCustomerNotFound):
+			// First sync with no Stripe id yet — nothing to preserve.
+		default:
+			return r.handleAmberfloError(logger, &account, getErr)
+		}
+	}
+
 	customer, err := r.AmberfloClient.EnsureCustomer(ctx, desired)
 	if err != nil {
 		return r.handleAmberfloError(logger, &account, err)
+	}
+
+	if stripeCustomerID != "" {
+		if err := r.scheduleStripePaymentSwitch(ctx, logger, &account, desired.ID, stripeCustomerID, time.Now()); err != nil {
+			switch {
+			case amberflo.IsTransient(err):
+				logger.Info("schedule Stripe payment switch transient failure; requeueing",
+					"err", err.Error(),
+					"requeueAfter", transientRequeueAfter.String())
+				reconcileErr = err
+				return ctrl.Result{RequeueAfter: transientRequeueAfter}, nil
+			case amberflo.IsPermanent(err):
+				logger.Error(err, "schedule Stripe payment switch permanent failure")
+				if r.Recorder != nil {
+					r.Recorder.Eventf(&account, "Warning", EventReasonSyncFailed,
+						"Stripe payment switch failed: %v", err)
+				}
+				// Do not wedge customer sync on a permanent switch failure;
+				// traits are already set and operators can fix Amberflo config.
+			default:
+				logger.Error(err, "schedule Stripe payment switch unclassified failure; requeueing")
+				reconcileErr = err
+				return ctrl.Result{RequeueAfter: transientRequeueAfter}, nil
+			}
+		}
+	}
+
+	if result, err := r.syncInvoices(ctx, logger, &account, desired.ID); err != nil || result.RequeueAfter > 0 {
+		reconcileErr = err
+		return result, reconcileErr
 	}
 
 	logger.Info("reconciled billing account", "projects", len(desired.Projects))
 	if r.Recorder != nil {
 		r.Recorder.Eventf(&account, "Normal", EventReasonSynced,
 			"Amberflo customer %s synced", customer.ID)
+	}
+	return ctrl.Result{}, nil
+}
+
+// syncInvoices lists Amberflo invoices for the customer and upserts Milo
+// Invoice resources. Transient list failures requeue without failing the
+// overall customer sync permanently; permanent failures are logged and
+// skipped so a bad invoice payload cannot wedge EnsureCustomer.
+func (r *BillingAccountReconciler) syncInvoices(
+	ctx context.Context,
+	logger logr.Logger,
+	account *billingv1alpha1.BillingAccount,
+	customerID string,
+) (ctrl.Result, error) {
+	if r.InvoiceSyncer == nil {
+		return ctrl.Result{}, nil
+	}
+
+	invoices, err := r.AmberfloClient.ListInvoices(ctx, customerID)
+	if err != nil {
+		switch {
+		case amberflo.IsTransient(err):
+			logger.Info("ListInvoices transient failure; requeueing",
+				"err", err.Error(),
+				"requeueAfter", transientRequeueAfter.String())
+			return ctrl.Result{RequeueAfter: transientRequeueAfter}, nil
+		case amberflo.IsPermanent(err):
+			logger.Error(err, "ListInvoices permanent failure; skipping invoice sync")
+			return ctrl.Result{}, nil
+		default:
+			logger.Error(err, "ListInvoices unclassified failure; requeueing")
+			return ctrl.Result{RequeueAfter: transientRequeueAfter}, nil
+		}
+	}
+
+	for i := range invoices {
+		if err := r.InvoiceSyncer.Upsert(ctx, account, invoices[i]); err != nil {
+			logger.Error(err, "invoice upsert failed; requeueing",
+				"invoiceStart", invoices[i].InvoiceStartTimeInSeconds)
+			return ctrl.Result{RequeueAfter: transientRequeueAfter}, nil
+		}
 	}
 	return ctrl.Result{}, nil
 }
@@ -271,9 +385,10 @@ func (r *BillingAccountReconciler) removeFinalizer(
 	ctx context.Context,
 	account *billingv1alpha1.BillingAccount,
 ) error {
-	if err := r.Patch(ctx,
-		finalizerApply(account.Name, account.Namespace, nil),
-		client.Apply,
+	if err := r.Apply(ctx,
+		client.ApplyConfigurationFromUnstructured(
+			finalizerApply(account.Name, account.Namespace, nil),
+		),
 		client.FieldOwner(customerLinkFieldOwner),
 	); err != nil {
 		return fmt.Errorf("remove finalizer: %w", err)
@@ -425,14 +540,15 @@ func sortedCopy(in []string) []string {
 }
 
 // SetupWithManager registers the reconciler with mgr, wiring a watch on
-// BillingAccount and a map-func watch on BillingAccountBinding that
-// enqueues the parent BillingAccount.
+// BillingAccount and map-func watches that enqueue the parent BillingAccount
+// when bindings, payment methods, or Stripe payment methods change.
 func (r *BillingAccountReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	if r.Client == nil {
 		r.Client = mgr.GetClient()
 	}
 	if r.Recorder == nil {
-		r.Recorder = mgr.GetEventRecorderFor("amberflo-provider")
+		// Legacy recorder: envtests and operators still consume corev1 Events.
+		r.Recorder = mgr.GetEventRecorderFor("amberflo-provider") //nolint:staticcheck // SA1019: GetEventRecorder (events/v1) is a larger migration.
 	}
 	if r.Log.GetSink() == nil {
 		r.Log = mgr.GetLogger().WithName("billingaccount-controller")
@@ -441,20 +557,72 @@ func (r *BillingAccountReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Named("billingaccount").
 		For(&billingv1alpha1.BillingAccount{}).
 		Watches(&billingv1alpha1.BillingAccountBinding{},
-			handler.EnqueueRequestsFromMapFunc(
-				func(ctx context.Context, obj client.Object) []reconcile.Request {
-					binding, ok := obj.(*billingv1alpha1.BillingAccountBinding)
-					if !ok {
-						return nil
-					}
-					return []reconcile.Request{{
-						NamespacedName: types.NamespacedName{
-							Name:      binding.Spec.BillingAccountRef.Name,
-							Namespace: binding.Namespace,
-						},
-					}}
-				},
-			),
+			handler.EnqueueRequestsFromMapFunc(mapBindingToAccount),
+		).
+		Watches(&billingv1alpha1.PaymentMethod{},
+			handler.EnqueueRequestsFromMapFunc(mapPaymentMethodToAccount),
+		).
+		Watches(&stripev1alpha1.StripePaymentMethod{},
+			handler.EnqueueRequestsFromMapFunc(r.mapStripePaymentMethodToAccount),
 		).
 		Complete(r)
+}
+
+func mapBindingToAccount(_ context.Context, obj client.Object) []reconcile.Request {
+	binding, ok := obj.(*billingv1alpha1.BillingAccountBinding)
+	if !ok {
+		return nil
+	}
+	return []reconcile.Request{{
+		NamespacedName: types.NamespacedName{
+			Name:      binding.Spec.BillingAccountRef.Name,
+			Namespace: binding.Namespace,
+		},
+	}}
+}
+
+func mapPaymentMethodToAccount(_ context.Context, obj client.Object) []reconcile.Request {
+	pm, ok := obj.(*billingv1alpha1.PaymentMethod)
+	if !ok {
+		return nil
+	}
+	if pm.Spec.BillingAccountRef.Name == "" {
+		return nil
+	}
+	return []reconcile.Request{{
+		NamespacedName: types.NamespacedName{
+			Name:      pm.Spec.BillingAccountRef.Name,
+			Namespace: pm.Namespace,
+		},
+	}}
+}
+
+// mapStripePaymentMethodToAccount resolves the parent PaymentMethod, then
+// enqueues its BillingAccount so stripeCustomerId appearing on SPM status
+// re-triggers Stripe trait sync without waiting for an unrelated BA write.
+func (r *BillingAccountReconciler) mapStripePaymentMethodToAccount(
+	ctx context.Context,
+	obj client.Object,
+) []reconcile.Request {
+	spm, ok := obj.(*stripev1alpha1.StripePaymentMethod)
+	if !ok {
+		return nil
+	}
+	pmName := spm.Spec.PaymentMethodRef.Name
+	if pmName == "" {
+		return nil
+	}
+	var pm billingv1alpha1.PaymentMethod
+	if err := r.Get(ctx, types.NamespacedName{Name: pmName, Namespace: spm.Namespace}, &pm); err != nil {
+		return nil
+	}
+	if pm.Spec.BillingAccountRef.Name == "" {
+		return nil
+	}
+	return []reconcile.Request{{
+		NamespacedName: types.NamespacedName{
+			Name:      pm.Spec.BillingAccountRef.Name,
+			Namespace: pm.Namespace,
+		},
+	}}
 }
