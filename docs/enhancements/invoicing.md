@@ -79,13 +79,16 @@ The sync only runs once `BillingAccount.status.DefaultPaymentMethodReady` is
 `Invoice` created in the meantime surfaces `PastDue`.
 
 > [!IMPORTANT]
-> Syncing the Stripe id alone isn't enough for Amberflo to charge against it
-> immediately. Per Amberflo, a payment method change only takes effect at the
-> start of the customer's next billing period unless it's explicitly
-> scheduled to the start of the *current* one. The sync must set that
-> effective-date field to the current period's start, or a customer's first
-> invoice after linking payment will compute correctly but have nothing to
-> charge against.
+> Syncing the Stripe id traits alone isn't enough for Amberflo to charge
+> against Stripe. Per Amberflo support, a payment-provider change must be
+> scheduled to the start of the *current* billing period via
+> [`POST /customers/payment-method/switch`][amberflo-payment-switch] with
+> `switchTimeInSeconds` set to that period start (derived from
+> `paymentTerms.invoiceDayOfMonth`, falling back to calendar month start).
+> The provider also sets ExtraTraits `stripeid` + `paymentprovidername=stripe`
+> and resolves `targetPaymentId` from
+> [`GET /payments/billing-settings/list`][amberflo-billing-settings].
+
 
 ### Invoice Webhook Receiver
 
@@ -94,8 +97,8 @@ A new webhook receiver handles Amberflo's `ready-product-invoices` event
 
 1. Verify the request came from Amberflo; reject anything that doesn't
    verify.
-2. Extract the Amberflo customer id (== `BillingAccount` name) and invoice
-   id from the payload.
+2. Extract the Amberflo customer id (== `BillingAccount` UID) and invoice
+id from the payload.
 3. Fetch full invoice detail from Amberflo's invoice API.
 4. Create or update `Invoice`, using the deterministic
    `<billing-account>-<year>-<month>` name from the generic contract,
@@ -178,3 +181,5 @@ real benefit.
 [payment-methods]: https://github.com/milo-os/billing/blob/main/docs/enhancements/payment-methods.md
 [amberflo-docs]: https://docs.amberflo.io/
 [amberflo-invoicing-billing]: https://enterprise-reference.amberflo.io/docs/invoicing-and-billing2
+[amberflo-payment-switch]: https://docs.amberflo.io/reference/create-customer-payment-method-switch
+[amberflo-billing-settings]: https://enterprise-reference.amberflo.io/switching-payment-methods

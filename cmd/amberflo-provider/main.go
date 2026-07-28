@@ -34,10 +34,13 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
 	billingv1alpha1 "go.miloapis.com/billing/api/v1alpha1"
+	stripev1alpha1 "go.miloapis.com/stripe-provider/api/v1alpha1"
 
 	"go.miloapis.com/amberflo-provider/internal/amberflo"
 	"go.miloapis.com/amberflo-provider/internal/config"
 	"go.miloapis.com/amberflo-provider/internal/controller"
+	"go.miloapis.com/amberflo-provider/internal/invoice"
+	amberflowebhook "go.miloapis.com/amberflo-provider/internal/webhook"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -61,6 +64,7 @@ func init() {
 	utilruntime.Must(config.RegisterDefaults(scheme))
 
 	utilruntime.Must(billingv1alpha1.AddToScheme(scheme))
+	utilruntime.Must(stripev1alpha1.AddToScheme(scheme))
 
 	// +kubebuilder:scaffold:scheme
 }
@@ -207,10 +211,17 @@ func main() {
 	// counted and timed via Prometheus.
 	amberfloClient = amberflo.NewInstrumentedClient(amberfloClient)
 
+	invoiceSyncer := &invoice.Syncer{
+		Client: mgr.GetClient(),
+		Log:    setupLog.WithName("invoice-syncer"),
+	}
+
 	if err = (&controller.BillingAccountReconciler{
-		Client:              mgr.GetClient(),
-		AmberfloClient:      amberfloClient,
-		AllowCustomerDelete: serverConfig.AllowCustomerDelete,
+		Client:                 mgr.GetClient(),
+		AmberfloClient:         amberfloClient,
+		AllowCustomerDelete:    serverConfig.AllowCustomerDelete,
+		InvoiceSyncer:          invoiceSyncer,
+		StripePaymentSettingID: serverConfig.AmberfloStripePaymentSettingID,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "BillingAccount")
 		os.Exit(1)
@@ -227,6 +238,34 @@ func main() {
 	if err = controller.AddIndexers(ctx, mgr.GetFieldIndexer()); err != nil {
 		setupLog.Error(err, "unable to add indexers")
 		os.Exit(1)
+	}
+
+	if webhookServer != nil {
+		webhookSecret, secretSource, secretErr := loadWebhookSecret(
+			serverConfig.AmberfloWebhookSigningSecretPath,
+			os.Getenv("AMBERFLO_WEBHOOK_SECRET"),
+		)
+		if secretErr != nil {
+			setupLog.Error(secretErr, "unable to load Amberflo webhook signing secret; invoice webhook disabled",
+				"path", serverConfig.AmberfloWebhookSigningSecretPath)
+		} else {
+			setupLog.Info("loaded Amberflo webhook signing secret",
+				"source", secretSource,
+				"sha256Prefix", keyFingerprint(webhookSecret),
+			)
+			if err = (&amberflowebhook.InvoiceHandler{
+				Client:         mgr.GetClient(),
+				AmberfloClient: amberfloClient,
+				Syncer:         invoiceSyncer,
+				Secret:         webhookSecret,
+				SecretHeader:   serverConfig.AmberfloWebhookSecretHeader,
+			}).SetupWithManager(mgr); err != nil {
+				setupLog.Error(err, "unable to register Amberflo invoice webhook")
+				os.Exit(1)
+			}
+		}
+	} else {
+		setupLog.Info("webhookServer not configured; Amberflo invoice webhook disabled")
 	}
 
 	// +kubebuilder:scaffold:builder
@@ -266,6 +305,19 @@ func main() {
 // Returns the trimmed key and a short source label for logging
 // ("file:<path>" or "env:AMBERFLO_API_KEY").
 func loadAPIKey(path, envValue string) (string, string, error) {
+	return loadSecretValue(path, envValue, "AMBERFLO_API_KEY", "Amberflo API key")
+}
+
+// loadWebhookSecret resolves the shared secret used to authenticate
+// inbound Amberflo invoice webhooks. Precedence mirrors loadAPIKey with
+// env var AMBERFLO_WEBHOOK_SECRET.
+func loadWebhookSecret(path, envValue string) (string, string, error) {
+	return loadSecretValue(path, envValue, "AMBERFLO_WEBHOOK_SECRET", "Amberflo webhook signing secret")
+}
+
+// loadSecretValue is the shared file-then-env loader used for Amberflo
+// credentials. See loadAPIKey for the precedence rules.
+func loadSecretValue(path, envValue, envName, label string) (string, string, error) {
 	envKey := strings.TrimSpace(envValue)
 
 	if path != "" {
@@ -274,7 +326,7 @@ func loadAPIKey(path, envValue string) (string, string, error) {
 		case err == nil:
 			key := strings.TrimSpace(string(raw))
 			if key == "" {
-				return "", "", fmt.Errorf("%q contains no API key after trimming whitespace", path)
+				return "", "", fmt.Errorf("%q contains no %s after trimming whitespace", path, label)
 			}
 			return key, "file:" + path, nil
 		case os.IsNotExist(err):
@@ -286,11 +338,11 @@ func loadAPIKey(path, envValue string) (string, string, error) {
 	}
 
 	if envKey != "" {
-		return envKey, "env:AMBERFLO_API_KEY", nil
+		return envKey, "env:" + envName, nil
 	}
 	return "", "", fmt.Errorf(
-		"no Amberflo API key available: set server-config.amberfloAPIKeyPath to a " +
-			"readable file or export AMBERFLO_API_KEY",
+		"no %s available: set server-config path to a readable file or export %s",
+		label, envName,
 	)
 }
 

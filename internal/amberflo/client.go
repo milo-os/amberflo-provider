@@ -82,6 +82,34 @@ type Client interface {
 	// Returns nil on 2xx. Returns *TransientError on 5xx/429/network.
 	// Returns *PermanentError on 4xx (non-429).
 	SubmitUsage(ctx context.Context, records []UsageRecord) error
+
+	// ListInvoices returns every customer-product invoice for the given
+	// Amberflo customer id (BillingAccount UID). An empty slice means the
+	// customer has no invoices yet.
+	ListInvoices(ctx context.Context, customerID string) ([]CustomerProductInvoice, error)
+
+	// GetLatestInvoice returns the most recent customer-product invoice
+	// for the given Amberflo customer id. Returns ErrInvoiceNotFound when
+	// Amberflo has none.
+	GetLatestInvoice(ctx context.Context, customerID string) (CustomerProductInvoice, error)
+
+	// GetInvoice returns a specific customer-product invoice identified by
+	// key (customerId, productPlanId, year, month, day). Returns
+	// ErrInvoiceNotFound when Amberflo has no matching invoice.
+	GetInvoice(ctx context.Context, key InvoiceKey) (CustomerProductInvoice, error)
+
+	// ListPaymentSettings returns configured payment-provider connections
+	// for the Amberflo account (used to resolve Stripe's paymentId).
+	ListPaymentSettings(ctx context.Context) ([]PaymentSetting, error)
+
+	// ListPaymentMethodSwitches returns payment-provider switches for a
+	// customer (used for idempotent Stripe scheduling).
+	ListPaymentMethodSwitches(ctx context.Context, customerID string) ([]PaymentMethodSwitch, error)
+
+	// SchedulePaymentMethodSwitch schedules a payment-provider transition
+	// at switchTimeInSeconds (Amberflo evaluates this against invoice
+	// period starts).
+	SchedulePaymentMethodSwitch(ctx context.Context, sw PaymentMethodSwitch) (PaymentMethodSwitch, error)
 }
 
 // ClientOptions configures a Client. BaseURL and APIKey are the only

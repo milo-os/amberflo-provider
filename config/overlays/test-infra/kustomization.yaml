@@ -7,8 +7,10 @@ kind: Kustomization
 #     `task dev:load`).
 #   * Points the provider at the Amberflo sandbox (https://app.amberflo.io).
 #   * Mounts the amberflo-credentials Secret created by
-#     `task test:create-amberflo-credentials` (from AMBERFLO_API_KEY).
+#     `task test:create-amberflo-credentials` (AMBERFLO_API_KEY and
+#     optional AMBERFLO_WEBHOOK_SECRET → webhook-signing-secret).
 #   * Enables leader election (kube-system lease).
+#   * Enables webhookServer (:9443) for Amberflo invoice Signals.
 
 namespace: amberflo-provider-system
 

@@ -213,7 +213,7 @@ tasks:
           echo "Submission consumer deployment not found, run 'task dev:deploy' first"
 
   test:create-amberflo-credentials:
-    desc: Create the amberflo-credentials Secret from AMBERFLO_API_KEY (.env).
+    desc: Create the amberflo-credentials Secret from AMBERFLO_API_KEY (.env); includes webhook-signing-secret when AMBERFLO_WEBHOOK_SECRET is set.
     silent: true
     cmds:
       - |
@@ -229,9 +229,17 @@ tasks:
           --dry-run=client -o yaml | task test-infra:kubectl -- apply -f -
       - |
         set -e
+        SECRET_ARGS=(
+          --namespace amberflo-provider-system
+          --from-literal=api-key="${AMBERFLO_API_KEY}"
+        )
+        if [ -n "${AMBERFLO_WEBHOOK_SECRET}" ]; then
+          SECRET_ARGS+=(--from-literal=webhook-signing-secret="${AMBERFLO_WEBHOOK_SECRET}")
+        else
+          echo "NOTE: AMBERFLO_WEBHOOK_SECRET unset; invoice webhook signing secret not added to Secret." >&2
+        fi
         task test-infra:kubectl -- create secret generic amberflo-credentials \
-          --namespace amberflo-provider-system \
-          --from-literal=api-key="${AMBERFLO_API_KEY}" \
+          "${SECRET_ARGS[@]}" \
           --dry-run=client -o yaml | task test-infra:kubectl -- apply -f -
 
   test:install-dependencies:

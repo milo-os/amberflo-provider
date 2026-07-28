@@ -27,6 +27,21 @@ Installation and usage documentation will be published as the project stabilizes
 - Kubernetes manifests and kustomize overlays live under `config/`.
 - A published OCI bundle for deployment will be announced here once available.
 
+### Amberflo credentials Secret
+
+Overlays that include the `amberflo-credentials` component (e.g. `test-infra`) expect a Secret named `amberflo-credentials`:
+
+| Key | Required | Purpose |
+|-----|----------|---------|
+| `api-key` | yes | Amberflo `X-API-KEY` |
+| `webhook-signing-secret` | no* | Shared secret for `POST /amberflo/invoices` on the webhook server (`:9443`) |
+
+\*Without `webhook-signing-secret` (or env `AMBERFLO_WEBHOOK_SECRET`), the controller still runs but invoice webhooks are disabled. Enable `webhookServer` in the AmberfloProvider config (already set in `base` / `dev` / `test-infra`) and ensure the Service exposes port `9443`.
+
+Invoice sync does **not** depend on the webhook: the BillingAccount reconciler polls Amberflo's invoice API as a fallback. When `webhookServer` is enabled without `tls.secretRef` (or mounted cert files), the provider serves an ephemeral self-signed certificate so the manager can start. For a real Amberflo `ready-product-invoices` destination, set `webhookServer.tls.secretRef` (or mount certs into `certDir`) and expose `https://…:9443/amberflo/invoices` with `authHeader: ["X-Auth", "<secret>"]`.
+
+Local/e2e: set `AMBERFLO_API_KEY` and optionally `AMBERFLO_WEBHOOK_SECRET` in `.env`, then `task test:create-amberflo-credentials`.
+
 If you are a Milo operator looking to try this out today, reach out to the team rather than attempting to self-install — the surface area is still changing.
 
 ## Development

@@ -1,25 +1,27 @@
 apiVersion: kustomize.config.k8s.io/v1alpha1
 kind: Component
 
-# amberflo-credentials mounts the X-API-KEY value from a Kubernetes
-# Secret into the controller pod at the path that AmberfloProvider
-# config's amberfloAPIKeyPath points to (default
-# /var/run/secrets/amberflo/api-key).
+# amberflo-credentials mounts keys from a Kubernetes Secret into the
+# controller / submission-consumer pods.
 #
-# Create the referenced Secret with `task test:create-amberflo-credentials`
-# (reads AMBERFLO_API_KEY from a repo-root .env file), or out-of-band:
+# Expected Secret keys (namespace amberflo-provider-system by default):
+#   api-key                 → /var/run/secrets/amberflo/api-key
+#                             (required; Amberflo X-API-KEY)
+#   webhook-signing-secret  → /var/run/secrets/amberflo/webhook-signing-secret
+#                             (optional; Amberflo invoice webhook shared secret)
+#
+# Create with `task test:create-amberflo-credentials` (reads
+# AMBERFLO_API_KEY and optional AMBERFLO_WEBHOOK_SECRET from .env), or:
 #
 #   kubectl create secret generic amberflo-credentials \
 #     --namespace amberflo-provider-system \
-#     --from-literal=api-key="$AMBERFLO_API_KEY"
+#     --from-literal=api-key="$AMBERFLO_API_KEY" \
+#     --from-literal=webhook-signing-secret="$AMBERFLO_WEBHOOK_SECRET"
 #
-# The Secret's `api-key` key is projected as a file named `api-key`
-# inside the mount AND also exported to the container as the env var
-# AMBERFLO_API_KEY. The provider's `loadAPIKey` prefers the file path
-# but falls back to the env var when the file is not present, which is
-# convenient for `go run` invocations and sandbox smoke tests. Rotate
-# by updating the Secret and restarting the Deployment; a rolling
-# restart avoids racing reconciles against a stale key cache.
+# The manager mounts the whole Secret (so missing webhook key does not
+# block the pod). Invoice webhooks stay disabled until the signing-secret
+# file or AMBERFLO_WEBHOOK_SECRET is present. Rotate by updating the
+# Secret and rolling the Deployment.
 
 patches:
   - target:
@@ -41,6 +43,12 @@ patches:
                       secretKeyRef:
                         name: amberflo-credentials
                         key: api-key
+                  - name: AMBERFLO_WEBHOOK_SECRET
+                    valueFrom:
+                      secretKeyRef:
+                        name: amberflo-credentials
+                        key: webhook-signing-secret
+                        optional: true
                 volumeMounts:
                   - mountPath: /var/run/secrets/amberflo
                     name: amberflo-credentials
@@ -49,9 +57,6 @@ patches:
               - name: amberflo-credentials
                 secret:
                   secretName: amberflo-credentials
-                  items:
-                    - key: api-key
-                      path: api-key
   - target:
       kind: Deployment
       name: submission-consumer

@@ -12,6 +12,10 @@ spec:
       port: 8443
       protocol: TCP
       targetPort: https
+    - name: webhook
+      port: 9443
+      protocol: TCP
+      targetPort: webhook
   selector:
     control-plane: amberflo-provider
     app.kubernetes.io/name: amberflo-provider

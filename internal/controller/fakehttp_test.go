@@ -183,6 +183,12 @@ func (f *recordingFakeServer) serve(w http.ResponseWriter, r *http.Request) {
 	}
 
 	switch {
+	case r.Method == http.MethodGet && r.URL.Path == "/customers/payment-method/switch":
+		writeJSON(w, http.StatusOK, []any{})
+
+	case r.Method == http.MethodPost && r.URL.Path == "/customers/payment-method/switch":
+		writeJSON(w, http.StatusOK, map[string]any{})
+
 	case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/customers/"):
 		id := strings.TrimPrefix(r.URL.Path, "/customers/")
 		f.mu.Lock()
@@ -348,6 +354,17 @@ func (f *recordingFakeServer) serve(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 
 	default:
+		// Invoice list — empty by default so BA reconcile invoice fallback
+		// is a no-op in tests that don't seed invoices.
+		if r.Method == http.MethodGet && r.URL.Path == "/payments/billing-settings/list" {
+			writeJSON(w, http.StatusOK, []any{})
+			return
+		}
+		if r.Method == http.MethodGet &&
+			strings.HasPrefix(r.URL.Path, "/payments/billing/customer-product-invoice") {
+			writeJSON(w, http.StatusOK, []any{})
+			return
+		}
 		http.Error(w, "not implemented", http.StatusNotImplemented)
 	}
 }

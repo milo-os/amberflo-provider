@@ -30,7 +30,7 @@ import (
 // assemble this struct.
 type DesiredCustomer struct {
 	// ID is the stable identifier used as Amberflo customerId. For the
-	// amberflo-provider this is always the Milo BillingAccount.metadata.name.
+	// amberflo-provider this is always the Milo BillingAccount.metadata.uid.
 	ID string
 	// Name is the customer's display name. If empty, ID is used as the
 	// fallback so Amberflo's required customerName field is always set.

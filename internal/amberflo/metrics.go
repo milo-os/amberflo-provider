@@ -135,6 +135,54 @@ func (ic *InstrumentedClient) SubmitUsage(ctx context.Context, records []UsageRe
 	return err
 }
 
+// ListInvoices forwards to the wrapped client while recording metrics.
+func (ic *InstrumentedClient) ListInvoices(ctx context.Context, customerID string) ([]CustomerProductInvoice, error) {
+	start := time.Now()
+	out, err := ic.Client.ListInvoices(ctx, customerID)
+	recordOp("ListInvoices", start, err)
+	return out, err
+}
+
+// GetLatestInvoice forwards to the wrapped client while recording metrics.
+func (ic *InstrumentedClient) GetLatestInvoice(ctx context.Context, customerID string) (CustomerProductInvoice, error) {
+	start := time.Now()
+	out, err := ic.Client.GetLatestInvoice(ctx, customerID)
+	recordOp("GetLatestInvoice", start, err)
+	return out, err
+}
+
+// GetInvoice forwards to the wrapped client while recording metrics.
+func (ic *InstrumentedClient) GetInvoice(ctx context.Context, key InvoiceKey) (CustomerProductInvoice, error) {
+	start := time.Now()
+	out, err := ic.Client.GetInvoice(ctx, key)
+	recordOp("GetInvoice", start, err)
+	return out, err
+}
+
+// ListPaymentSettings forwards to the wrapped client while recording metrics.
+func (ic *InstrumentedClient) ListPaymentSettings(ctx context.Context) ([]PaymentSetting, error) {
+	start := time.Now()
+	out, err := ic.Client.ListPaymentSettings(ctx)
+	recordOp("ListPaymentSettings", start, err)
+	return out, err
+}
+
+// ListPaymentMethodSwitches forwards to the wrapped client while recording metrics.
+func (ic *InstrumentedClient) ListPaymentMethodSwitches(ctx context.Context, customerID string) ([]PaymentMethodSwitch, error) {
+	start := time.Now()
+	out, err := ic.Client.ListPaymentMethodSwitches(ctx, customerID)
+	recordOp("ListPaymentMethodSwitches", start, err)
+	return out, err
+}
+
+// SchedulePaymentMethodSwitch forwards to the wrapped client while recording metrics.
+func (ic *InstrumentedClient) SchedulePaymentMethodSwitch(ctx context.Context, sw PaymentMethodSwitch) (PaymentMethodSwitch, error) {
+	start := time.Now()
+	out, err := ic.Client.SchedulePaymentMethodSwitch(ctx, sw)
+	recordOp("SchedulePaymentMethodSwitch", start, err)
+	return out, err
+}
+
 // recordOp records a single outbound Amberflo call. status captures the
 // classified outcome (success, transient, permanent) in lieu of a raw
 // HTTP status — the Client does not expose per-request status codes at
@@ -154,7 +202,7 @@ func classifyForMetrics(err error) (status, class string) {
 	if err == nil {
 		return "success", "2xx"
 	}
-	if errors.Is(err, ErrCustomerNotFound) || errors.Is(err, ErrMeterNotFound) {
+	if errors.Is(err, ErrCustomerNotFound) || errors.Is(err, ErrMeterNotFound) || errors.Is(err, ErrInvoiceNotFound) {
 		return "not_found", "4xx"
 	}
 	var pe *PermanentError

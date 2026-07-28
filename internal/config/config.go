@@ -73,6 +73,26 @@ type AmberfloProvider struct {
 	// /var/run/secrets/amberflo/api-key.
 	AmberfloAPIKeyPath string `json:"amberfloAPIKeyPath,omitempty"`
 
+	// AmberfloWebhookSigningSecretPath is the filesystem path where the
+	// shared secret used to authenticate inbound Amberflo invoice
+	// webhooks is mounted. Defaults to
+	// /var/run/secrets/amberflo/webhook-signing-secret. When the file is
+	// absent the controller also accepts AMBERFLO_WEBHOOK_SECRET.
+	AmberfloWebhookSigningSecretPath string `json:"amberfloWebhookSigningSecretPath,omitempty"`
+
+	// AmberfloWebhookSecretHeader is the HTTP header Amberflo sends with
+	// the shared webhook auth secret when registering a
+	// ready-product-invoices destination (authHeader[0]). Defaults to
+	// X-Auth per Amberflo's Invoice Ready Webhook docs.
+	AmberfloWebhookSecretHeader string `json:"amberfloWebhookSecretHeader,omitempty"`
+
+	// AmberfloStripePaymentSettingID optionally pins the Amberflo
+	// payment-settings id used as targetPaymentId when scheduling a
+	// Stripe payment-method switch (POST /customers/payment-method/switch).
+	// When empty, the controller selects the first billing-settings entry
+	// whose billingSystem matches Stripe.
+	AmberfloStripePaymentSettingID string `json:"amberfloStripePaymentSettingId,omitempty"`
+
 	// AmberfloRateLimitPerSec caps the token-bucket rate used by the
 	// internal Amberflo client. Amberflo does not publish an explicit
 	// rate limit; 10 req/s is a conservative default that can be tuned
@@ -130,6 +150,12 @@ func SetDefaults_AmberfloProvider(obj *AmberfloProvider) {
 	if obj.AmberfloAPIKeyPath == "" {
 		obj.AmberfloAPIKeyPath = "/var/run/secrets/amberflo/api-key"
 	}
+	if obj.AmberfloWebhookSigningSecretPath == "" {
+		obj.AmberfloWebhookSigningSecretPath = "/var/run/secrets/amberflo/webhook-signing-secret"
+	}
+	if obj.AmberfloWebhookSecretHeader == "" {
+		obj.AmberfloWebhookSecretHeader = "X-Auth"
+	}
 	if obj.AmberfloRateLimitPerSec == 0 {
 		obj.AmberfloRateLimitPerSec = 10
 	}
@@ -177,16 +203,39 @@ func (c *WebhookServerConfig) Options(ctx context.Context, secretsClient client.
 	opts := webhook.Options{
 		Host:     c.Host,
 		Port:     c.Port,
-		CertDir:  c.TLS.CertDir,
 		CertName: c.TLS.CertName,
 		KeyName:  c.TLS.KeyName,
 	}
 
-	if secretRef := c.TLS.SecretRef; secretRef != nil {
+	switch {
+	case c.TLS.SecretRef != nil:
+		// Load serving certs from a Secret via GetCertificate. Leave
+		// CertDir empty so controller-runtime does not require files on
+		// disk (certwatcher.New fails when tls.crt/tls.key are absent).
 		opts.TLSOpts = c.TLS.Options(ctx, secretsClient)
+	case c.TLS.CertDir != "" && webhookCertFilesExist(c.TLS.CertDir, c.TLS.CertName, c.TLS.KeyName):
+		opts.CertDir = c.TLS.CertDir
+	default:
+		// Ephemeral self-signed cert so mgr.Start succeeds without
+		// cert-manager. Prefer tls.secretRef (or mounted CertDir) for
+		// production Amberflo destinations behind a real hostname.
+		opts.TLSOpts = []func(*tls.Config){ephemeralSelfSignedTLS()}
 	}
 
 	return opts
+}
+
+func webhookCertFilesExist(dir, certName, keyName string) bool {
+	if dir == "" || certName == "" || keyName == "" {
+		return false
+	}
+	if _, err := os.Stat(filepath.Join(dir, certName)); err != nil {
+		return false
+	}
+	if _, err := os.Stat(filepath.Join(dir, keyName)); err != nil {
+		return false
+	}
+	return true
 }
 
 // +k8s:deepcopy-gen=true

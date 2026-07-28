@@ -39,12 +39,17 @@ type fakeServer struct {
 
 	customers map[string]*storedWireCustomer
 	meters    map[string]*storedWireMeter
+	invoices  map[string][]CustomerProductInvoice
+	latest    map[string]*CustomerProductInvoice
 	requests  []recordedRequest
 
 	// failure injection
 	failStatus     int
 	failCount      int
 	failRetryAfter int
+
+	// armInvoiceNull makes the next invoice list response a JSON null.
+	armInvoiceNull bool
 }
 
 // storedWireCustomer mirrors the wireCustomer shape for tests.
@@ -86,6 +91,8 @@ func newFake(t *testing.T) *fakeServer {
 		apiKey:    "unit-test-key",
 		customers: map[string]*storedWireCustomer{},
 		meters:    map[string]*storedWireMeter{},
+		invoices:  map[string][]CustomerProductInvoice{},
+		latest:    map[string]*CustomerProductInvoice{},
 	}
 	f.srv = httptest.NewServer(http.HandlerFunc(f.serve))
 	t.Cleanup(f.srv.Close)
@@ -105,6 +112,23 @@ func (f *fakeServer) seed(c storedWireCustomer) {
 		cp.Traits = cloneStringMap(cp.Traits)
 	}
 	f.customers[c.CustomerId] = &cp
+}
+
+// seedInvoices installs a customer-product invoice list for ListInvoices.
+func (f *fakeServer) seedInvoices(customerID string, invs []CustomerProductInvoice) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	cp := make([]CustomerProductInvoice, len(invs))
+	copy(cp, invs)
+	f.invoices[customerID] = cp
+}
+
+// seedLatestInvoice installs the payload returned by GetLatestInvoice.
+func (f *fakeServer) seedLatestInvoice(customerID string, inv CustomerProductInvoice) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	cp := inv
+	f.latest[customerID] = &cp
 }
 
 // seedMeter installs a meter as if it had already been created. Used by
@@ -183,6 +207,14 @@ func (f *fakeServer) serve(w http.ResponseWriter, r *http.Request) {
 	}
 
 	switch {
+	case r.Method == http.MethodGet && r.URL.Path == "/customers/payment-method/switch":
+		writeJSON(w, http.StatusOK, []PaymentMethodSwitch{})
+
+	case r.Method == http.MethodPost && r.URL.Path == "/customers/payment-method/switch":
+		var sw PaymentMethodSwitch
+		_ = json.Unmarshal(body, &sw)
+		writeJSON(w, http.StatusOK, sw)
+
 	case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/customers/"):
 		id := strings.TrimPrefix(r.URL.Path, "/customers/")
 		f.mu.Lock()
@@ -195,7 +227,7 @@ func (f *fakeServer) serve(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, c)
 
 	case (r.Method == http.MethodPost || r.Method == http.MethodPut) &&
-		strings.HasPrefix(r.URL.Path, "/customers"):
+		r.URL.Path == "/customers":
 		var in storedWireCustomer
 		if err := json.Unmarshal(body, &in); err != nil {
 			http.Error(w, "bad json: "+err.Error(), http.StatusBadRequest)
@@ -377,6 +409,66 @@ func (f *fakeServer) serve(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 
 	default:
+		if r.Method == http.MethodGet && r.URL.Path == "/payments/billing-settings/list" {
+			writeJSON(w, http.StatusOK, []PaymentSetting{})
+			return
+		}
+		if r.Method == http.MethodGet &&
+			strings.HasPrefix(r.URL.Path, "/payments/billing/customer-product-invoice") {
+			customerID := r.URL.Query().Get("customerId")
+			if r.URL.Query().Get("latest") == "true" {
+				f.mu.Lock()
+				inv, ok := f.latest[customerID]
+				f.mu.Unlock()
+				if !ok || inv == nil {
+					http.Error(w, "not found", http.StatusNotFound)
+					return
+				}
+				writeJSON(w, http.StatusOK, inv)
+				return
+			}
+			// Get-by-key (no /all suffix).
+			if !strings.HasSuffix(r.URL.Path, "/all") &&
+				r.URL.Query().Get("productPlanId") != "" {
+				f.mu.Lock()
+				out := f.invoices[customerID]
+				f.mu.Unlock()
+				planID := r.URL.Query().Get("productPlanId")
+				year := r.URL.Query().Get("year")
+				month := r.URL.Query().Get("month")
+				day := r.URL.Query().Get("day")
+				for i := range out {
+					inv := out[i]
+					if inv.InvoiceKey.ProductPlanID == planID &&
+						strconv.FormatInt(inv.InvoiceKey.Year, 10) == year &&
+						strconv.FormatInt(inv.InvoiceKey.Month, 10) == month &&
+						strconv.FormatInt(inv.InvoiceKey.Day, 10) == day {
+						writeJSON(w, http.StatusOK, inv)
+						return
+					}
+				}
+				http.Error(w, "not found", http.StatusNotFound)
+				return
+			}
+			f.mu.Lock()
+			nullBody := f.armInvoiceNull
+			if nullBody {
+				f.armInvoiceNull = false
+			}
+			out := f.invoices[customerID]
+			f.mu.Unlock()
+			if nullBody {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write([]byte("null"))
+				return
+			}
+			if out == nil {
+				out = []CustomerProductInvoice{}
+			}
+			writeJSON(w, http.StatusOK, out)
+			return
+		}
 		http.Error(w, "not implemented", http.StatusNotImplemented)
 	}
 }
