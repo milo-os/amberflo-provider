@@ -339,7 +339,8 @@ func (r *MeterDefinitionReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		r.Client = mgr.GetClient()
 	}
 	if r.Recorder == nil {
-		r.Recorder = mgr.GetEventRecorderFor("amberflo-provider")
+		// Legacy recorder: envtests and operators still consume corev1 Events.
+		r.Recorder = mgr.GetEventRecorderFor("amberflo-provider") //nolint:staticcheck // SA1019: GetEventRecorder (events/v1) is a larger migration.
 	}
 	if r.Log.GetSink() == nil {
 		r.Log = mgr.GetLogger().WithName("meterdefinition-controller")

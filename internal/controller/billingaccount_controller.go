@@ -166,9 +166,10 @@ func (r *BillingAccountReconciler) Reconcile(ctx context.Context, req reconcile.
 	// stale. A full Update would PUT our stale spec back and strip
 	// such fields.
 	if !controllerutil.ContainsFinalizer(&account, CustomerLinkFinalizer) {
-		if err := r.Patch(ctx,
-			finalizerApply(account.Name, account.Namespace, []string{CustomerLinkFinalizer}),
-			client.Apply,
+		if err := r.Apply(ctx,
+			client.ApplyConfigurationFromUnstructured(
+				finalizerApply(account.Name, account.Namespace, []string{CustomerLinkFinalizer}),
+			),
 			client.FieldOwner(customerLinkFieldOwner),
 			client.ForceOwnership,
 		); err != nil {
@@ -211,8 +212,7 @@ func (r *BillingAccountReconciler) Reconcile(ctx context.Context, req reconcile.
 		case errors.Is(getErr, amberflo.ErrCustomerNotFound):
 			// First sync with no Stripe id yet — nothing to preserve.
 		default:
-			reconcileErr = fmt.Errorf("get Amberflo customer for stripe trait preserve: %w", getErr)
-			return ctrl.Result{}, reconcileErr
+			return r.handleAmberfloError(logger, &account, getErr)
 		}
 	}
 
@@ -385,9 +385,10 @@ func (r *BillingAccountReconciler) removeFinalizer(
 	ctx context.Context,
 	account *billingv1alpha1.BillingAccount,
 ) error {
-	if err := r.Patch(ctx,
-		finalizerApply(account.Name, account.Namespace, nil),
-		client.Apply,
+	if err := r.Apply(ctx,
+		client.ApplyConfigurationFromUnstructured(
+			finalizerApply(account.Name, account.Namespace, nil),
+		),
 		client.FieldOwner(customerLinkFieldOwner),
 	); err != nil {
 		return fmt.Errorf("remove finalizer: %w", err)
@@ -546,7 +547,8 @@ func (r *BillingAccountReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		r.Client = mgr.GetClient()
 	}
 	if r.Recorder == nil {
-		r.Recorder = mgr.GetEventRecorderFor("amberflo-provider")
+		// Legacy recorder: envtests and operators still consume corev1 Events.
+		r.Recorder = mgr.GetEventRecorderFor("amberflo-provider") //nolint:staticcheck // SA1019: GetEventRecorder (events/v1) is a larger migration.
 	}
 	if r.Log.GetSink() == nil {
 		r.Log = mgr.GetLogger().WithName("billingaccount-controller")
