@@ -112,8 +112,14 @@ type BillingAccountReconciler struct {
 	// StripePaymentSettingID optionally pins the Amberflo payment-settings
 	// id used as targetPaymentId when scheduling a Stripe payment-method
 	// switch. When empty, the reconciler picks the first setting whose
-	// billingSystem matches Stripe.
+	// billingSystem matches Stripe, or falls back to type/id "stripe".
 	StripePaymentSettingID string
+
+	// PaymentSwitchMinFutureSkew is added to "now" when the preferred
+	// billing-period start is not strictly in the future. Amberflo
+	// rejects past or equal-to-now switchTimeInSeconds. Zero means the
+	// default (60s).
+	PaymentSwitchMinFutureSkew time.Duration
 
 	// Log is the reconciler-scoped logger. Each Reconcile call derives a
 	// per-reconcile logger with account/namespace/customerID values.

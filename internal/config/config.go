@@ -90,8 +90,15 @@ type AmberfloProvider struct {
 	// payment-settings id used as targetPaymentId when scheduling a
 	// Stripe payment-method switch (POST /customers/payment-method/switch).
 	// When empty, the controller selects the first billing-settings entry
-	// whose billingSystem matches Stripe.
+	// whose billingSystem matches Stripe, or falls back to type/id
+	// "stripe" when the list has no Stripe entry.
 	AmberfloStripePaymentSettingID string `json:"amberfloStripePaymentSettingId,omitempty"`
+
+	// AmberfloPaymentSwitchMinFutureSkew is added to "now" when the
+	// preferred billing-period start is not strictly in the future.
+	// Amberflo rejects switchTimeInSeconds that are in the past or equal
+	// to "now". Defaults to 60s.
+	AmberfloPaymentSwitchMinFutureSkew metav1.Duration `json:"amberfloPaymentSwitchMinFutureSkew,omitempty"`
 
 	// AmberfloRateLimitPerSec caps the token-bucket rate used by the
 	// internal Amberflo client. Amberflo does not publish an explicit
@@ -155,6 +162,9 @@ func SetDefaults_AmberfloProvider(obj *AmberfloProvider) {
 	}
 	if obj.AmberfloWebhookSecretHeader == "" {
 		obj.AmberfloWebhookSecretHeader = "X-Auth"
+	}
+	if obj.AmberfloPaymentSwitchMinFutureSkew.Duration == 0 {
+		obj.AmberfloPaymentSwitchMinFutureSkew.Duration = 60 * time.Second
 	}
 	if obj.AmberfloRateLimitPerSec == 0 {
 		obj.AmberfloRateLimitPerSec = 10
