@@ -256,15 +256,45 @@ func TestStripeTraitsFromExisting(t *testing.T) {
 	}
 }
 
-func TestScheduleStripePaymentSwitch_MissingSettingIsPermanent(t *testing.T) {
+func TestScheduleStripePaymentSwitch_EmptySettingsFallsBack(t *testing.T) {
 	t.Parallel()
 
 	now := time.Date(2026, 7, 15, 12, 0, 0, 0, time.UTC)
 	account := &billingv1alpha1.BillingAccount{
 		ObjectMeta: metav1.ObjectMeta{Name: "ba", Namespace: "ns", UID: types.UID("cust-3")},
 	}
-	r := &BillingAccountReconciler{AmberfloClient: &stripeSwitchStub{}}
-	err := r.scheduleStripePaymentSwitch(context.Background(), logr.Discard(), account, "cust-3", "cus_x", now)
+	stub := &stripeSwitchStub{}
+	r := &BillingAccountReconciler{AmberfloClient: stub}
+	if err := r.scheduleStripePaymentSwitch(context.Background(), logr.Discard(), account, "cust-3", "cus_x", now); err != nil {
+		t.Fatalf("schedule: %v", err)
+	}
+	if stub.scheduleCalls != 1 {
+		t.Fatalf("Schedule calls = %d, want 1", stub.scheduleCalls)
+	}
+	if stub.lastSwitch.TargetPaymentType != paymentProviderStripe {
+		t.Errorf("targetPaymentType = %q, want %q", stub.lastSwitch.TargetPaymentType, paymentProviderStripe)
+	}
+	if stub.lastSwitch.TargetPaymentID != stripePaymentSwitchFallbackID {
+		t.Errorf("targetPaymentId = %q, want %q", stub.lastSwitch.TargetPaymentID, stripePaymentSwitchFallbackID)
+	}
+	wantAt := switchTimeUnix(now, account.Spec.PaymentTerms)
+	if stub.lastSwitch.SwitchTimeInSeconds != wantAt {
+		t.Errorf("switchTimeInSeconds = %d, want %d", stub.lastSwitch.SwitchTimeInSeconds, wantAt)
+	}
+}
+
+func TestScheduleStripePaymentSwitch_PinnedSettingMissingIsPermanent(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 7, 15, 12, 0, 0, 0, time.UTC)
+	account := &billingv1alpha1.BillingAccount{
+		ObjectMeta: metav1.ObjectMeta{Name: "ba", Namespace: "ns", UID: types.UID("cust-4")},
+	}
+	r := &BillingAccountReconciler{
+		AmberfloClient:         &stripeSwitchStub{},
+		StripePaymentSettingID: "ps-missing",
+	}
+	err := r.scheduleStripePaymentSwitch(context.Background(), logr.Discard(), account, "cust-4", "cus_x", now)
 	if !amberflo.IsPermanent(err) {
 		t.Fatalf("expected PermanentError, got %v", err)
 	}
@@ -274,11 +304,12 @@ func TestScheduleStripePaymentSwitch_Idempotent(t *testing.T) {
 	t.Parallel()
 
 	now := time.Date(2026, 7, 15, 12, 0, 0, 0, time.UTC)
-	switchAt := periodStartUTC(now, &billingv1alpha1.PaymentTerms{InvoiceDayOfMonth: 1}).Unix()
+	terms := &billingv1alpha1.PaymentTerms{InvoiceDayOfMonth: 1}
+	switchAt := switchTimeUnix(now, terms)
 	account := &billingv1alpha1.BillingAccount{
 		ObjectMeta: metav1.ObjectMeta{Name: "ba", Namespace: "ns", UID: types.UID("cust-1")},
 		Spec: billingv1alpha1.BillingAccountSpec{
-			PaymentTerms: &billingv1alpha1.PaymentTerms{InvoiceDayOfMonth: 1},
+			PaymentTerms: terms,
 		},
 	}
 
@@ -323,7 +354,7 @@ func TestScheduleStripePaymentSwitch_Creates(t *testing.T) {
 	if stub.scheduleCalls != 1 {
 		t.Fatalf("Schedule calls = %d, want 1", stub.scheduleCalls)
 	}
-	wantAt := periodStartUTC(now, account.Spec.PaymentTerms).Unix()
+	wantAt := switchTimeUnix(now, account.Spec.PaymentTerms)
 	if stub.lastSwitch.SwitchTimeInSeconds != wantAt {
 		t.Errorf("switchTimeInSeconds = %d, want %d", stub.lastSwitch.SwitchTimeInSeconds, wantAt)
 	}
@@ -332,6 +363,17 @@ func TestScheduleStripePaymentSwitch_Creates(t *testing.T) {
 	}
 	if stub.lastSwitch.TargetCustomerIdentifier != "cus_new" {
 		t.Errorf("targetCustomerIdentifier = %q", stub.lastSwitch.TargetCustomerIdentifier)
+	}
+}
+
+func TestSwitchTimeUnix_PastPeriodStartUsesFutureSkew(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 7, 15, 12, 0, 0, 0, time.UTC)
+	got := switchTimeUnix(now, &billingv1alpha1.PaymentTerms{InvoiceDayOfMonth: 1})
+	want := now.Add(paymentSwitchMinFutureSkew).Unix()
+	if got != want {
+		t.Errorf("switchTimeUnix = %d, want %d (period start is in the past)", got, want)
 	}
 }
 

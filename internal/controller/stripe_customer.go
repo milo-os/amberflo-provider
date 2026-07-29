@@ -36,6 +36,17 @@ const (
 	traitPaymentProviderName = "paymentprovidername"
 
 	paymentProviderStripe = "stripe"
+
+	// stripePaymentSwitchFallbackID is used as targetPaymentId when
+	// Amberflo's billing-settings/list is empty. Staging with an Active
+	// Stripe connector accepts this literal; the API normalizes
+	// targetPaymentType to "stripe".
+	stripePaymentSwitchFallbackID = "stripe"
+
+	// paymentSwitchMinFutureSkew is added when the computed period start
+	// is not strictly in the future. Amberflo rejects switchTimeInSeconds
+	// that are in the past or equal to "now".
+	paymentSwitchMinFutureSkew = 60 * time.Second
 )
 
 // resolveStripeCustomerID returns the Stripe customer id for the account's
@@ -128,8 +139,16 @@ func stripeTraitsFromExisting(traits map[string]string) map[string]string {
 }
 
 // scheduleStripePaymentSwitch ensures Amberflo will charge through Stripe
-// starting at the current billing-period boundary by calling
-// POST /customers/payment-method/switch with switchTimeInSeconds.
+// by calling POST /customers/payment-method/switch.
+//
+// targetPaymentType/Id prefer an entry from GET /payments/billing-settings/list
+// when present. Amberflo's Connectors "Stripe" Active state does not always
+// populate that list; in that case we fall back to type/id "stripe", which
+// the switch API accepts once Stripe is connected.
+//
+// switchTimeInSeconds prefers the current billing-period start when that
+// instant is still in the future. Otherwise Amberflo requires a future
+// timestamp, so we schedule ASAP (now + paymentSwitchMinFutureSkew).
 //
 // Idempotent: skips when a matching switch already exists for the same
 // Stripe customer id and switch time.
@@ -145,23 +164,12 @@ func (r *BillingAccountReconciler) scheduleStripePaymentSwitch(
 		return nil
 	}
 
-	settings, err := r.AmberfloClient.ListPaymentSettings(ctx)
+	targetType, targetID, err := r.resolveStripePaymentSwitchTarget(ctx)
 	if err != nil {
-		return fmt.Errorf("list Amberflo payment settings: %w", err)
-	}
-	preferID := ""
-	if r.StripePaymentSettingID != "" {
-		preferID = r.StripePaymentSettingID
-	}
-	setting, ok := amberflo.FindPaymentSettingBySystem(settings, amberflo.BillingSystemStripe, preferID)
-	if !ok {
-		return &amberflo.PermanentError{Err: fmt.Errorf(
-			"no Amberflo payment setting for billingSystem=%q (configure Stripe in Amberflo Payments settings)",
-			amberflo.BillingSystemStripe,
-		)}
+		return err
 	}
 
-	switchAt := periodStartUTC(now, account.Spec.PaymentTerms).Unix()
+	switchAt := switchTimeUnix(now, account.Spec.PaymentTerms)
 	existing, err := r.AmberfloClient.ListPaymentMethodSwitches(ctx, customerID)
 	if err != nil {
 		return fmt.Errorf("list Amberflo payment method switches: %w", err)
@@ -170,20 +178,18 @@ func (r *BillingAccountReconciler) scheduleStripePaymentSwitch(
 		logger.V(1).Info("Amberflo Stripe payment switch already scheduled",
 			"stripeCustomerId", stripeCustomerID,
 			"switchTimeInSeconds", switchAt,
-			"paymentSettingId", setting.ID,
+			"targetPaymentType", targetType,
+			"targetPaymentId", targetID,
 		)
 		return nil
 	}
 
 	sw := amberflo.PaymentMethodSwitch{
 		CustomerID:               customerID,
-		TargetPaymentType:        setting.BillingSystem,
-		TargetPaymentID:          setting.ID,
+		TargetPaymentType:        targetType,
+		TargetPaymentID:          targetID,
 		TargetCustomerIdentifier: stripeCustomerID,
 		SwitchTimeInSeconds:      switchAt,
-	}
-	if sw.TargetPaymentType == "" {
-		sw.TargetPaymentType = amberflo.BillingSystemStripe
 	}
 
 	got, err := r.AmberfloClient.SchedulePaymentMethodSwitch(ctx, sw)
@@ -194,6 +200,45 @@ func (r *BillingAccountReconciler) scheduleStripePaymentSwitch(
 		"switch", amberflo.FormatPaymentMethodSwitch(got),
 	)
 	return nil
+}
+
+// resolveStripePaymentSwitchTarget picks targetPaymentType/Id for a Stripe
+// switch. Prefers billing-settings/list (or an explicit config pin); falls
+// back to the Connectors-compatible "stripe"/"stripe" pair when the list
+// has no Stripe entry.
+func (r *BillingAccountReconciler) resolveStripePaymentSwitchTarget(ctx context.Context) (targetType, targetID string, err error) {
+	settings, err := r.AmberfloClient.ListPaymentSettings(ctx)
+	if err != nil {
+		return "", "", fmt.Errorf("list Amberflo payment settings: %w", err)
+	}
+	preferID := r.StripePaymentSettingID
+	if setting, ok := amberflo.FindPaymentSettingBySystem(settings, amberflo.BillingSystemStripe, preferID); ok {
+		targetType = setting.BillingSystem
+		if targetType == "" {
+			targetType = paymentProviderStripe
+		}
+		return targetType, setting.ID, nil
+	}
+	if preferID != "" {
+		// Operator pinned an id that is not present/Stripe-matched.
+		return "", "", &amberflo.PermanentError{Err: fmt.Errorf(
+			"Amberflo Stripe payment setting id %q not found in billing-settings/list",
+			preferID,
+		)}
+	}
+	return paymentProviderStripe, stripePaymentSwitchFallbackID, nil
+}
+
+// switchTimeUnix returns the Unix timestamp Amberflo should evaluate for a
+// payment-method switch. Prefer the current period start when it is still
+// strictly in the future; otherwise schedule ASAP.
+func switchTimeUnix(now time.Time, terms *billingv1alpha1.PaymentTerms) int64 {
+	now = now.UTC()
+	start := periodStartUTC(now, terms)
+	if start.After(now) {
+		return start.Unix()
+	}
+	return now.Add(paymentSwitchMinFutureSkew).Unix()
 }
 
 // monthStartUTC returns midnight UTC on the first day of now's calendar month.
@@ -215,12 +260,12 @@ func invoiceDayInMonth(year int, month time.Month, day int) time.Time {
 	return time.Date(year, month, day, 0, 0, 0, 0, time.UTC)
 }
 
-// periodStartUTC derives the billing-period start used as
-// switchTimeInSeconds. When payment terms carry an invoice day of month,
-// the period start is that day in the current period (clamped to the
-// month's last day). If today's date is still before this month's invoice
-// day, the current period started on the previous month's invoice day.
-// Otherwise it falls back to calendar month start.
+// periodStartUTC derives the billing-period start used when that instant is
+// still in the future (see switchTimeUnix). When payment terms carry an
+// invoice day of month, the period start is that day in the current period
+// (clamped to the month's last day). If today's date is still before this
+// month's invoice day, the current period started on the previous month's
+// invoice day. Otherwise it falls back to calendar month start.
 func periodStartUTC(now time.Time, terms *billingv1alpha1.PaymentTerms) time.Time {
 	now = now.UTC()
 	if terms == nil || terms.InvoiceDayOfMonth <= 0 {
