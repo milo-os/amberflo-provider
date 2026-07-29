@@ -32,6 +32,7 @@ func (in *AmberfloProvider) DeepCopyInto(out *AmberfloProvider) {
 		*out = new(WebhookServerConfig)
 		(*in).DeepCopyInto(*out)
 	}
+	out.AmberfloPaymentSwitchMinFutureSkew = in.AmberfloPaymentSwitchMinFutureSkew
 	out.SubmissionRetryAfter = in.SubmissionRetryAfter
 	out.SubmissionAckWait = in.SubmissionAckWait
 	out.SubmissionFetchTimeout = in.SubmissionFetchTimeout

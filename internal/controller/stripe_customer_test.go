@@ -277,7 +277,7 @@ func TestScheduleStripePaymentSwitch_EmptySettingsFallsBack(t *testing.T) {
 	if stub.lastSwitch.TargetPaymentID != stripePaymentSwitchFallbackID {
 		t.Errorf("targetPaymentId = %q, want %q", stub.lastSwitch.TargetPaymentID, stripePaymentSwitchFallbackID)
 	}
-	wantAt := switchTimeUnix(now, account.Spec.PaymentTerms)
+	wantAt := switchTimeUnix(now, account.Spec.PaymentTerms, defaultPaymentSwitchMinFutureSkew)
 	if stub.lastSwitch.SwitchTimeInSeconds != wantAt {
 		t.Errorf("switchTimeInSeconds = %d, want %d", stub.lastSwitch.SwitchTimeInSeconds, wantAt)
 	}
@@ -305,7 +305,7 @@ func TestScheduleStripePaymentSwitch_Idempotent(t *testing.T) {
 
 	now := time.Date(2026, 7, 15, 12, 0, 0, 0, time.UTC)
 	terms := &billingv1alpha1.PaymentTerms{InvoiceDayOfMonth: 1}
-	switchAt := switchTimeUnix(now, terms)
+	switchAt := switchTimeUnix(now, terms, defaultPaymentSwitchMinFutureSkew)
 	account := &billingv1alpha1.BillingAccount{
 		ObjectMeta: metav1.ObjectMeta{Name: "ba", Namespace: "ns", UID: types.UID("cust-1")},
 		Spec: billingv1alpha1.BillingAccountSpec{
@@ -354,7 +354,7 @@ func TestScheduleStripePaymentSwitch_Creates(t *testing.T) {
 	if stub.scheduleCalls != 1 {
 		t.Fatalf("Schedule calls = %d, want 1", stub.scheduleCalls)
 	}
-	wantAt := switchTimeUnix(now, account.Spec.PaymentTerms)
+	wantAt := switchTimeUnix(now, account.Spec.PaymentTerms, defaultPaymentSwitchMinFutureSkew)
 	if stub.lastSwitch.SwitchTimeInSeconds != wantAt {
 		t.Errorf("switchTimeInSeconds = %d, want %d", stub.lastSwitch.SwitchTimeInSeconds, wantAt)
 	}
@@ -370,8 +370,9 @@ func TestSwitchTimeUnix_PastPeriodStartUsesFutureSkew(t *testing.T) {
 	t.Parallel()
 
 	now := time.Date(2026, 7, 15, 12, 0, 0, 0, time.UTC)
-	got := switchTimeUnix(now, &billingv1alpha1.PaymentTerms{InvoiceDayOfMonth: 1})
-	want := now.Add(paymentSwitchMinFutureSkew).Unix()
+	skew := 90 * time.Second
+	got := switchTimeUnix(now, &billingv1alpha1.PaymentTerms{InvoiceDayOfMonth: 1}, skew)
+	want := now.Add(skew).Unix()
 	if got != want {
 		t.Errorf("switchTimeUnix = %d, want %d (period start is in the past)", got, want)
 	}

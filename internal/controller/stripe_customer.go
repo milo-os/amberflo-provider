@@ -43,10 +43,9 @@ const (
 	// targetPaymentType to "stripe".
 	stripePaymentSwitchFallbackID = "stripe"
 
-	// paymentSwitchMinFutureSkew is added when the computed period start
-	// is not strictly in the future. Amberflo rejects switchTimeInSeconds
-	// that are in the past or equal to "now".
-	paymentSwitchMinFutureSkew = 60 * time.Second
+	// defaultPaymentSwitchMinFutureSkew is used when
+	// PaymentSwitchMinFutureSkew is unset on the reconciler.
+	defaultPaymentSwitchMinFutureSkew = 60 * time.Second
 )
 
 // resolveStripeCustomerID returns the Stripe customer id for the account's
@@ -148,7 +147,7 @@ func stripeTraitsFromExisting(traits map[string]string) map[string]string {
 //
 // switchTimeInSeconds prefers the current billing-period start when that
 // instant is still in the future. Otherwise Amberflo requires a future
-// timestamp, so we schedule ASAP (now + paymentSwitchMinFutureSkew).
+// timestamp, so we schedule ASAP (now + PaymentSwitchMinFutureSkew).
 //
 // Idempotent: skips when a matching switch already exists for the same
 // Stripe customer id and switch time.
@@ -169,7 +168,7 @@ func (r *BillingAccountReconciler) scheduleStripePaymentSwitch(
 		return err
 	}
 
-	switchAt := switchTimeUnix(now, account.Spec.PaymentTerms)
+	switchAt := switchTimeUnix(now, account.Spec.PaymentTerms, r.paymentSwitchMinFutureSkew())
 	existing, err := r.AmberfloClient.ListPaymentMethodSwitches(ctx, customerID)
 	if err != nil {
 		return fmt.Errorf("list Amberflo payment method switches: %w", err)
@@ -229,16 +228,28 @@ func (r *BillingAccountReconciler) resolveStripePaymentSwitchTarget(ctx context.
 	return paymentProviderStripe, stripePaymentSwitchFallbackID, nil
 }
 
+// paymentSwitchMinFutureSkew returns the configured skew, or the default
+// when unset.
+func (r *BillingAccountReconciler) paymentSwitchMinFutureSkew() time.Duration {
+	if r != nil && r.PaymentSwitchMinFutureSkew > 0 {
+		return r.PaymentSwitchMinFutureSkew
+	}
+	return defaultPaymentSwitchMinFutureSkew
+}
+
 // switchTimeUnix returns the Unix timestamp Amberflo should evaluate for a
 // payment-method switch. Prefer the current period start when it is still
-// strictly in the future; otherwise schedule ASAP.
-func switchTimeUnix(now time.Time, terms *billingv1alpha1.PaymentTerms) int64 {
+// strictly in the future; otherwise schedule ASAP using skew.
+func switchTimeUnix(now time.Time, terms *billingv1alpha1.PaymentTerms, skew time.Duration) int64 {
 	now = now.UTC()
+	if skew <= 0 {
+		skew = defaultPaymentSwitchMinFutureSkew
+	}
 	start := periodStartUTC(now, terms)
 	if start.After(now) {
 		return start.Unix()
 	}
-	return now.Add(paymentSwitchMinFutureSkew).Unix()
+	return now.Add(skew).Unix()
 }
 
 // monthStartUTC returns midnight UTC on the first day of now's calendar month.

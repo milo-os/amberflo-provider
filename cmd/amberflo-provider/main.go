@@ -217,11 +217,12 @@ func main() {
 	}
 
 	if err = (&controller.BillingAccountReconciler{
-		Client:                 mgr.GetClient(),
-		AmberfloClient:         amberfloClient,
-		AllowCustomerDelete:    serverConfig.AllowCustomerDelete,
-		InvoiceSyncer:          invoiceSyncer,
-		StripePaymentSettingID: serverConfig.AmberfloStripePaymentSettingID,
+		Client:                     mgr.GetClient(),
+		AmberfloClient:             amberfloClient,
+		AllowCustomerDelete:        serverConfig.AllowCustomerDelete,
+		InvoiceSyncer:              invoiceSyncer,
+		StripePaymentSettingID:     serverConfig.AmberfloStripePaymentSettingID,
+		PaymentSwitchMinFutureSkew: serverConfig.AmberfloPaymentSwitchMinFutureSkew.Duration,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "BillingAccount")
 		os.Exit(1)
