@@ -222,7 +222,7 @@ func (r *BillingAccountReconciler) resolveStripePaymentSwitchTarget(ctx context.
 	if preferID != "" {
 		// Operator pinned an id that is not present/Stripe-matched.
 		return "", "", &amberflo.PermanentError{Err: fmt.Errorf(
-			"Amberflo Stripe payment setting id %q not found in billing-settings/list",
+			"amberflo Stripe payment setting id %q not found in billing-settings/list",
 			preferID,
 		)}
 	}
