@@ -345,10 +345,9 @@ func (c *client) ensureProductItem(ctx context.Context, item wireProductItem) er
 func (c *client) ensureProductItemPrice(ctx context.Context, price wireProductItemPrice) error {
 	path := productItemPricePath + "/" + url.PathEscape(price.ID)
 	var existing wireProductItemPrice
-	_, body, err := c.doJSON(ctx, http.MethodGet, path, nil, &existing)
-	switch {
-	case err == nil:
-		_ = body
+	_, _, err := c.doJSON(ctx, http.MethodGet, path, nil, &existing)
+	switch err {
+	case nil:
 		if existing.ProductItemID == price.ProductItemID &&
 			existing.ProductItemPriceName == price.ProductItemPriceName &&
 			jsonEqual(existing.Price, price.Price) {
