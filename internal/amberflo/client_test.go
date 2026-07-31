@@ -18,6 +18,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -37,11 +38,15 @@ type fakeServer struct {
 
 	mu sync.Mutex
 
-	customers map[string]*storedWireCustomer
-	meters    map[string]*storedWireMeter
-	invoices  map[string][]CustomerProductInvoice
-	latest    map[string]*CustomerProductInvoice
-	requests  []recordedRequest
+	customers     map[string]*storedWireCustomer
+	meters        map[string]*storedWireMeter
+	invoices      map[string][]CustomerProductInvoice
+	latest        map[string]*CustomerProductInvoice
+	productItems  map[string]*wireProductItem
+	itemPrices    map[string]*wireProductItemPrice
+	productPlans  map[string]*wireProductPlan
+	customerPlans map[string][]wireCustomerProductPlan
+	requests      []recordedRequest
 
 	// failure injection
 	failStatus     int
@@ -88,11 +93,15 @@ type recordedRequest struct {
 func newFake(t *testing.T) *fakeServer {
 	t.Helper()
 	f := &fakeServer{
-		apiKey:    "unit-test-key",
-		customers: map[string]*storedWireCustomer{},
-		meters:    map[string]*storedWireMeter{},
-		invoices:  map[string][]CustomerProductInvoice{},
-		latest:    map[string]*CustomerProductInvoice{},
+		apiKey:        "unit-test-key",
+		customers:     map[string]*storedWireCustomer{},
+		meters:        map[string]*storedWireMeter{},
+		invoices:      map[string][]CustomerProductInvoice{},
+		latest:        map[string]*CustomerProductInvoice{},
+		productItems:  map[string]*wireProductItem{},
+		itemPrices:    map[string]*wireProductItemPrice{},
+		productPlans:  map[string]*wireProductPlan{},
+		customerPlans: map[string][]wireCustomerProductPlan{},
 	}
 	f.srv = httptest.NewServer(http.HandlerFunc(f.serve))
 	t.Cleanup(f.srv.Close)
@@ -409,6 +418,9 @@ func (f *fakeServer) serve(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 
 	default:
+		if f.servePricing(w, r, body) {
+			return
+		}
 		if r.Method == http.MethodGet && r.URL.Path == "/payments/billing-settings/list" {
 			writeJSON(w, http.StatusOK, []PaymentSetting{})
 			return
@@ -471,6 +483,140 @@ func (f *fakeServer) serve(w http.ResponseWriter, r *http.Request) {
 		}
 		http.Error(w, "not implemented", http.StatusNotImplemented)
 	}
+}
+
+// servePricing handles product-item, product-item-price, product-plan, and
+// customer-pricing routes used by EnsureProductPlan / EnsureCustomerPlan.
+func (f *fakeServer) servePricing(w http.ResponseWriter, r *http.Request, body []byte) bool {
+	switch {
+	case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, productItemsPath+"/"):
+		id := strings.TrimPrefix(r.URL.Path, productItemsPath+"/")
+		f.mu.Lock()
+		item, ok := f.productItems[id]
+		f.mu.Unlock()
+		if !ok {
+			http.Error(w, "not found", http.StatusNotFound)
+			return true
+		}
+		writeJSON(w, http.StatusOK, item)
+		return true
+
+	case r.Method == http.MethodPost && r.URL.Path == productItemsPath:
+		var in wireProductItem
+		if err := json.Unmarshal(body, &in); err != nil || in.ID == "" {
+			http.Error(w, "bad product item", http.StatusBadRequest)
+			return true
+		}
+		f.mu.Lock()
+		cp := in
+		f.productItems[in.ID] = &cp
+		f.mu.Unlock()
+		writeJSON(w, http.StatusOK, in)
+		return true
+
+	case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, productItemPricePath+"/"):
+		id := strings.TrimPrefix(r.URL.Path, productItemPricePath+"/")
+		f.mu.Lock()
+		price, ok := f.itemPrices[id]
+		f.mu.Unlock()
+		if !ok {
+			http.Error(w, "not found", http.StatusNotFound)
+			return true
+		}
+		writeJSON(w, http.StatusOK, price)
+		return true
+
+	case r.Method == http.MethodPost && r.URL.Path == productItemPricePath:
+		var in wireProductItemPrice
+		if err := json.Unmarshal(body, &in); err != nil || in.ID == "" {
+			http.Error(w, "bad product item price", http.StatusBadRequest)
+			return true
+		}
+		f.mu.Lock()
+		cp := in
+		if len(in.Price) > 0 {
+			cp.Price = append(json.RawMessage(nil), in.Price...)
+		}
+		f.itemPrices[in.ID] = &cp
+		f.mu.Unlock()
+		writeJSON(w, http.StatusOK, in)
+		return true
+
+	case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, productPlansPath+"/"):
+		id := strings.TrimPrefix(r.URL.Path, productPlansPath+"/")
+		f.mu.Lock()
+		plan, ok := f.productPlans[id]
+		f.mu.Unlock()
+		if !ok {
+			http.Error(w, "not found", http.StatusNotFound)
+			return true
+		}
+		writeJSON(w, http.StatusOK, plan)
+		return true
+
+	case r.Method == http.MethodPost && r.URL.Path == productPlansPath:
+		var in wireProductPlan
+		if err := json.Unmarshal(body, &in); err != nil || in.ID == "" {
+			http.Error(w, "bad product plan", http.StatusBadRequest)
+			return true
+		}
+		f.mu.Lock()
+		cp := in
+		if in.ProductItemPriceIdsMap != nil {
+			cp.ProductItemPriceIdsMap = maps.Clone(in.ProductItemPriceIdsMap)
+		}
+		if in.FeeMap != nil {
+			cp.FeeMap = maps.Clone(in.FeeMap)
+		}
+		f.productPlans[in.ID] = &cp
+		f.mu.Unlock()
+		writeJSON(w, http.StatusOK, in)
+		return true
+
+	case r.Method == http.MethodDelete && strings.HasPrefix(r.URL.Path, productPlansPath+"/"):
+		id := strings.TrimPrefix(r.URL.Path, productPlansPath+"/")
+		f.mu.Lock()
+		delete(f.productPlans, id)
+		f.mu.Unlock()
+		w.WriteHeader(http.StatusNoContent)
+		return true
+
+	case r.Method == http.MethodGet && r.URL.Path == customerPricingListPath:
+		customerID := r.URL.Query().Get("customerId")
+		f.mu.Lock()
+		out := append([]wireCustomerProductPlan(nil), f.customerPlans[customerID]...)
+		f.mu.Unlock()
+		writeJSON(w, http.StatusOK, out)
+		return true
+
+	case r.Method == http.MethodPost && r.URL.Path == customerPricingPath:
+		var in wireCustomerProductPlan
+		if err := json.Unmarshal(body, &in); err != nil || in.CustomerID == "" || in.ProductPlanID == "" {
+			http.Error(w, "bad customer plan", http.StatusBadRequest)
+			return true
+		}
+		f.mu.Lock()
+		plans := f.customerPlans[in.CustomerID]
+		replaced := false
+		for i := range plans {
+			if plans[i].ProductPlanID == in.ProductPlanID {
+				plans[i] = in
+				replaced = true
+				break
+			}
+		}
+		if !replaced {
+			if in.RelationID == "" {
+				in.RelationID = "rel-" + in.CustomerID + "-" + in.ProductPlanID
+			}
+			plans = append(plans, in)
+		}
+		f.customerPlans[in.CustomerID] = plans
+		f.mu.Unlock()
+		writeJSON(w, http.StatusOK, in)
+		return true
+	}
+	return false
 }
 
 // lockingTransitionAllowed reports whether the one-way Amberflo

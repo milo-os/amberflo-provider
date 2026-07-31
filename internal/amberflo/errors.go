@@ -37,6 +37,14 @@ var ErrMeterNotFound = errors.New("amberflo: meter not found")
 // Amberflo has no invoice for the requested customer.
 var ErrInvoiceNotFound = errors.New("amberflo: invoice not found")
 
+// ErrProductPlanNotFound is the sentinel returned by GetProductPlan when
+// Amberflo responds with a 404 for the requested product plan id.
+var ErrProductPlanNotFound = errors.New("amberflo: product plan not found")
+
+// ErrCustomerPlanNotFound is the sentinel returned when no customer-
+// pricing assignment matches the requested customer/plan pair.
+var ErrCustomerPlanNotFound = errors.New("amberflo: customer plan not found")
+
 // TransientError wraps a failure that the caller should retry with
 // backoff. Network errors, 429s, and 5xx responses all surface as
 // TransientError.

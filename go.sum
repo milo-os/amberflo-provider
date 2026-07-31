@@ -95,8 +95,6 @@ github.com/maruel/natural v1.1.1 h1:Hja7XhhmvEFhcByqDoHz9QZbkWey+COd9xWfCfn1ioo=
 github.com/maruel/natural v1.1.1/go.mod h1:v+Rfd79xlw1AgVBjbO0BEQmptqb5HvL/k9GRHB7ZKEg=
 github.com/mfridman/tparse v0.18.0 h1:wh6dzOKaIwkUGyKgOntDW4liXSo37qg5AXbIhkMV3vE=
 github.com/mfridman/tparse v0.18.0/go.mod h1:gEvqZTuCgEhPbYk/2lS3Kcxg1GmTxxU7kTC8DvP0i/A=
-github.com/milo-os/billing v0.2.18-0.20260728093009-b15306e18cd0 h1:nW2wTAgEtifp4MjdXMpe53NylkSS60S1HNtZ4fZK5TQ=
-github.com/milo-os/billing v0.2.18-0.20260728093009-b15306e18cd0/go.mod h1:nPJuynQBBVxZAl46uLm3noy0CvPPlK53D50r8xM2Irk=
 github.com/milo-os/stripe-provider v0.1.7-0.20260603154949-84bd6a63a51a h1:S+zboMn+XDO6zN7zkrCikMvGFj3qzleBG4+UB9WcBoM=
 github.com/milo-os/stripe-provider v0.1.7-0.20260603154949-84bd6a63a51a/go.mod h1:yQGK18sYq3AKOAMEsG6SvbgCyyzZ6Hc4PHkrz6fE+pc=
 github.com/modern-go/concurrent v0.0.0-20180228061459-e0a39a4cb421/go.mod h1:6dJC0mAP4ikYIbvyc7fijjWJddQyLn8Ig3JB5CqoB9Q=
@@ -166,6 +164,8 @@ github.com/valyala/bytebufferpool v1.0.0 h1:GqA5TC/0021Y/b9FG4Oi9Mr3q7XYx6Kllzaw
 github.com/valyala/bytebufferpool v1.0.0/go.mod h1:6bBcMArwyJ5K/AmCkWv1jt77kVWyCJ6HpOuEn7z0Csc=
 github.com/x448/float16 v0.8.4 h1:qLwI1I70+NjRFUR3zs1JPUCgaCXSh3SW62uAKT1mSBM=
 github.com/x448/float16 v0.8.4/go.mod h1:14CWIYCyZA/cWjXOioeEpHeN/83MdbZDRQHoFcYsOfg=
+go.miloapis.com/billing v0.3.1 h1:WzYKNchXwTRxtHlI5eiZ5KTJIn8Wee/UbmkhzGVNpuI=
+go.miloapis.com/billing v0.3.1/go.mod h1:nPJuynQBBVxZAl46uLm3noy0CvPPlK53D50r8xM2Irk=
 go.opentelemetry.io/auto/sdk v1.2.1 h1:jXsnJ4Lmnqd11kwkBV2LgLoFMZKizbCi5fNZ/ipaZ64=
 go.opentelemetry.io/auto/sdk v1.2.1/go.mod h1:KRTj+aOaElaLi+wW1kO/DZRXwkF4C5xPbEe3ZiIhN7Y=
 go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.61.0 h1:F7Jx+6hwnZ41NSFTO5q4LYDtJRXBf2PD0rNBkeB/lus=

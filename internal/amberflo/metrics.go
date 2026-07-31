@@ -183,6 +183,54 @@ func (ic *InstrumentedClient) SchedulePaymentMethodSwitch(ctx context.Context, s
 	return out, err
 }
 
+// EnsureProductPlan forwards to the wrapped client while recording metrics.
+func (ic *InstrumentedClient) EnsureProductPlan(ctx context.Context, desired DesiredProductPlan) (ProductPlan, error) {
+	start := time.Now()
+	out, err := ic.Client.EnsureProductPlan(ctx, desired)
+	recordOp("EnsureProductPlan", start, err)
+	return out, err
+}
+
+// DeleteProductPlan forwards to the wrapped client while recording metrics.
+func (ic *InstrumentedClient) DeleteProductPlan(ctx context.Context, id string) error {
+	start := time.Now()
+	err := ic.Client.DeleteProductPlan(ctx, id)
+	recordOp("DeleteProductPlan", start, err)
+	return err
+}
+
+// GetProductPlan forwards to the wrapped client while recording metrics.
+func (ic *InstrumentedClient) GetProductPlan(ctx context.Context, id string) (ProductPlan, error) {
+	start := time.Now()
+	out, err := ic.Client.GetProductPlan(ctx, id)
+	recordOp("GetProductPlan", start, err)
+	return out, err
+}
+
+// EnsureCustomerPlan forwards to the wrapped client while recording metrics.
+func (ic *InstrumentedClient) EnsureCustomerPlan(ctx context.Context, desired DesiredCustomerPlan) (CustomerPlan, error) {
+	start := time.Now()
+	out, err := ic.Client.EnsureCustomerPlan(ctx, desired)
+	recordOp("EnsureCustomerPlan", start, err)
+	return out, err
+}
+
+// CancelCustomerPlan forwards to the wrapped client while recording metrics.
+func (ic *InstrumentedClient) CancelCustomerPlan(ctx context.Context, customerID, productPlanID string) error {
+	start := time.Now()
+	err := ic.Client.CancelCustomerPlan(ctx, customerID, productPlanID)
+	recordOp("CancelCustomerPlan", start, err)
+	return err
+}
+
+// ListCustomerPlans forwards to the wrapped client while recording metrics.
+func (ic *InstrumentedClient) ListCustomerPlans(ctx context.Context, customerID string) ([]CustomerPlan, error) {
+	start := time.Now()
+	out, err := ic.Client.ListCustomerPlans(ctx, customerID)
+	recordOp("ListCustomerPlans", start, err)
+	return out, err
+}
+
 // recordOp records a single outbound Amberflo call. status captures the
 // classified outcome (success, transient, permanent) in lieu of a raw
 // HTTP status — the Client does not expose per-request status codes at
@@ -202,7 +250,8 @@ func classifyForMetrics(err error) (status, class string) {
 	if err == nil {
 		return "success", "2xx"
 	}
-	if errors.Is(err, ErrCustomerNotFound) || errors.Is(err, ErrMeterNotFound) || errors.Is(err, ErrInvoiceNotFound) {
+	if errors.Is(err, ErrCustomerNotFound) || errors.Is(err, ErrMeterNotFound) || errors.Is(err, ErrInvoiceNotFound) ||
+		errors.Is(err, ErrProductPlanNotFound) || errors.Is(err, ErrCustomerPlanNotFound) {
 		return "not_found", "4xx"
 	}
 	var pe *PermanentError
