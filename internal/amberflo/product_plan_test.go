@@ -144,6 +144,31 @@ func TestEnsureProductPlan_DimensionMatch(t *testing.T) {
 	}
 }
 
+func TestEnsureProductPlan_UnmatchedWithMatchRejected(t *testing.T) {
+	c, _ := newTestClient(t)
+	flat := 0.01
+	desired := DesiredProductPlan{
+		ID:   "offer-bad-default",
+		Name: "Bad",
+		Items: []DesiredPlanItem{{
+			ID:           "tokens",
+			ChargeType:   PlanChargeTypeUsage,
+			MeterAPIName: "meter-tokens",
+			Rates: []DesiredPlanRate{
+				{Match: &DimensionFilter{Dimension: "model", Value: "sonnet"}, Flat: floatPtr(0.000003)},
+				{Flat: &flat}, // unmatched catch-all — not representable in Amberflo
+			},
+		}},
+	}
+	_, err := c.EnsureProductPlan(context.Background(), desired)
+	if err == nil {
+		t.Fatal("expected permanent error for unmatched rate alongside Match")
+	}
+	if !IsPermanent(err) {
+		t.Fatalf("want permanent error, got %v", err)
+	}
+}
+
 func TestEnsureProductPlan_OneTimeAndRecurringFees(t *testing.T) {
 	c, f := newTestClient(t)
 	desired := DesiredProductPlan{
@@ -211,6 +236,10 @@ func TestDeleteProductPlan_RemovesExisting(t *testing.T) {
 	f.mu.Unlock()
 	if ok {
 		t.Fatal("plan still present")
+	}
+	counts := methodCounts(f.requestsCopy())
+	if counts[http.MethodDelete] != 1 {
+		t.Errorf("expected 1 DELETE, got %#v", counts)
 	}
 }
 

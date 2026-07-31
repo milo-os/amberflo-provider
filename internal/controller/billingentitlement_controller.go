@@ -15,6 +15,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -41,6 +42,9 @@ const (
 	// Annotation tracking the last product plan assigned so a swap can
 	// cancel the previous assignment even if ListCustomerPlans races.
 	lastProductPlanAnnotation = "amberflo.miloapis.com/last-product-plan-id"
+	// Annotation tracking the Amberflo customer id (= BillingAccount.UID)
+	// so delete can cancel when the BillingAccount is already gone.
+	lastCustomerIDAnnotation = "amberflo.miloapis.com/last-customer-id"
 )
 
 // BillingEntitlementReconciler syncs BillingEntitlements into Amberflo
@@ -134,10 +138,29 @@ func (r *BillingEntitlementReconciler) Reconcile(ctx context.Context, req reconc
 	productPlanID := string(offer.UID)
 	logger = logger.WithValues("customerID", customerID, "productPlanID", productPlanID)
 
-	// Cancel previous plan when offerRef changed (annotation tracks last sync).
+	// Wait for the Offer reconciler to create the Amberflo product plan.
+	// Assigning before the plan exists returns a permanent 4xx that would
+	// otherwise stop reconcile with no retry, and Offer sync does not
+	// always mutate the Offer CR so the watch may not re-enqueue us.
+	if _, err := r.AmberfloClient.GetProductPlan(ctx, productPlanID); err != nil {
+		if errors.Is(err, amberflo.ErrProductPlanNotFound) {
+			logger.Info("product plan not in Amberflo yet; requeueing")
+			return ctrl.Result{RequeueAfter: transientRequeueAfter}, nil
+		}
+		return r.handleAmberfloError(logger, &be, err)
+	}
+
+	// Best-effort cancel of the previous plan when offerRef changed.
+	// EnsureCustomerPlan also cancels stray active plans, so a permanent
+	// cancel failure must not block assignment.
 	if prev := be.Annotations[lastProductPlanAnnotation]; prev != "" && prev != productPlanID {
 		if err := r.AmberfloClient.CancelCustomerPlan(ctx, customerID, prev); err != nil {
-			return r.handleAmberfloError(logger, &be, err)
+			logger.Info("CancelCustomerPlan for previous plan failed; continuing with Ensure",
+				"prevPlan", prev, "err", err.Error())
+			if r.Recorder != nil {
+				r.Recorder.Eventf(&be, "Warning", EventReasonSyncFailed,
+					"cancel previous plan %s: %v (continuing)", prev, err)
+			}
 		}
 	}
 
@@ -152,8 +175,11 @@ func (r *BillingEntitlementReconciler) Reconcile(ctx context.Context, req reconc
 	if be.Annotations == nil {
 		be.Annotations = map[string]string{}
 	}
-	if be.Annotations[lastProductPlanAnnotation] != productPlanID {
+	needAnnotate := be.Annotations[lastProductPlanAnnotation] != productPlanID ||
+		be.Annotations[lastCustomerIDAnnotation] != customerID
+	if needAnnotate {
 		be.Annotations[lastProductPlanAnnotation] = productPlanID
+		be.Annotations[lastCustomerIDAnnotation] = customerID
 		if err := r.Update(ctx, &be); err != nil {
 			reconcileErr = fmt.Errorf("update last-product-plan annotation: %w", err)
 			return ctrl.Result{}, reconcileErr
@@ -178,37 +204,46 @@ func (r *BillingEntitlementReconciler) reconcileDelete(
 		return ctrl.Result{}, nil
 	}
 
-	customerID, productPlanID, err := r.resolveIDs(ctx, be)
-	if err != nil {
-		// If BA/Offer are already gone, fall back to the annotation.
-		if productPlanID == "" {
-			productPlanID = be.Annotations[lastProductPlanAnnotation]
+	customerID, productPlanID, resolveErr := r.resolveIDs(ctx, be)
+	annotatedCustomer := be.Annotations[lastCustomerIDAnnotation]
+	annotatedPlan := be.Annotations[lastProductPlanAnnotation]
+
+	if customerID == "" {
+		customerID = annotatedCustomer
+	}
+	if productPlanID == "" {
+		productPlanID = annotatedPlan
+	}
+	if customerID == "" || productPlanID == "" {
+		logger.Info("unable to resolve customer/plan for cancel; releasing finalizer",
+			"resolveErr", errString(resolveErr))
+		controllerutil.RemoveFinalizer(be, CustomerPlanFinalizer)
+		if updateErr := r.Update(ctx, be); updateErr != nil {
+			return ctrl.Result{}, fmt.Errorf("remove finalizer: %w", updateErr)
 		}
-		if customerID == "" || productPlanID == "" {
-			logger.Info("unable to resolve customer/plan for cancel; releasing finalizer",
-				"err", err.Error())
-			controllerutil.RemoveFinalizer(be, CustomerPlanFinalizer)
-			if updateErr := r.Update(ctx, be); updateErr != nil {
-				return ctrl.Result{}, fmt.Errorf("remove finalizer: %w", updateErr)
-			}
-			return ctrl.Result{}, nil
-		}
+		return ctrl.Result{}, nil
 	}
 
-	if err := r.AmberfloClient.CancelCustomerPlan(ctx, customerID, productPlanID); err != nil {
-		switch {
-		case amberflo.IsTransient(err):
-			logger.Info("CancelCustomerPlan transient failure; requeueing", "err", err.Error())
-			if r.Recorder != nil {
-				r.Recorder.Eventf(be, "Warning", EventReasonDeleteFailed, "transient: %v", err)
+	plansToCancel := map[string]struct{}{productPlanID: {}}
+	if annotatedPlan != "" {
+		plansToCancel[annotatedPlan] = struct{}{}
+	}
+	for planID := range plansToCancel {
+		if err := r.AmberfloClient.CancelCustomerPlan(ctx, customerID, planID); err != nil {
+			switch {
+			case amberflo.IsTransient(err):
+				logger.Info("CancelCustomerPlan transient failure; requeueing", "plan", planID, "err", err.Error())
+				if r.Recorder != nil {
+					r.Recorder.Eventf(be, "Warning", EventReasonDeleteFailed, "transient: %v", err)
+				}
+				return ctrl.Result{RequeueAfter: transientRequeueAfter}, nil
+			default:
+				logger.Error(err, "CancelCustomerPlan permanent failure; finalizer blocks deletion", "plan", planID)
+				if r.Recorder != nil {
+					r.Recorder.Eventf(be, "Warning", EventReasonDeleteFailed, "permanent: %v", err)
+				}
+				return ctrl.Result{RequeueAfter: permanentDisableRequeueAfter}, nil
 			}
-			return ctrl.Result{RequeueAfter: transientRequeueAfter}, nil
-		default:
-			logger.Error(err, "CancelCustomerPlan permanent failure; finalizer blocks deletion")
-			if r.Recorder != nil {
-				r.Recorder.Eventf(be, "Warning", EventReasonDeleteFailed, "permanent: %v", err)
-			}
-			return ctrl.Result{RequeueAfter: permanentDisableRequeueAfter}, nil
 		}
 	}
 
@@ -223,6 +258,13 @@ func (r *BillingEntitlementReconciler) reconcileDelete(
 		return ctrl.Result{}, fmt.Errorf("remove finalizer: %w", err)
 	}
 	return ctrl.Result{}, nil
+}
+
+func errString(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
 }
 
 func (r *BillingEntitlementReconciler) resolveIDs(
@@ -304,6 +346,7 @@ func (r *BillingEntitlementReconciler) mapOfferToEntitlements(
 	}
 	var list billingv1alpha1.BillingEntitlementList
 	if err := r.List(ctx, &list); err != nil {
+		log.FromContext(ctx).Error(err, "list BillingEntitlements for Offer fan-out", "offer", offer.Name)
 		return nil
 	}
 	var reqs []reconcile.Request

@@ -116,6 +116,21 @@ func (r *OfferReconciler) Reconcile(ctx context.Context, req reconcile.Request) 
 		return r.handleAmberfloError(logger, &offer, err)
 	}
 
+	// Touch an annotation after successful sync so BillingEntitlement
+	// watches re-enqueue when the plan first becomes available in Amberflo
+	// (EnsureProductPlan may be a no-op that would not otherwise change the CR).
+	const planSyncedAnnotation = "amberflo.miloapis.com/product-plan-id"
+	if offer.Annotations == nil {
+		offer.Annotations = map[string]string{}
+	}
+	if offer.Annotations[planSyncedAnnotation] != plan.ID {
+		offer.Annotations[planSyncedAnnotation] = plan.ID
+		if err := r.Update(ctx, &offer); err != nil {
+			reconcileErr = fmt.Errorf("annotate product-plan-id: %w", err)
+			return ctrl.Result{}, reconcileErr
+		}
+	}
+
 	logger.Info("reconciled offer product plan", "planID", plan.ID, "items", len(desired.Items))
 	if r.Recorder != nil {
 		r.Recorder.Eventf(&offer, "Normal", EventReasonSynced,

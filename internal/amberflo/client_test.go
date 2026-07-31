@@ -576,6 +576,23 @@ func (f *fakeServer) servePricing(w http.ResponseWriter, r *http.Request, body [
 	case r.Method == http.MethodDelete && strings.HasPrefix(r.URL.Path, productPlansPath+"/"):
 		id := strings.TrimPrefix(r.URL.Path, productPlansPath+"/")
 		f.mu.Lock()
+		plan, ok := f.productPlans[id]
+		if !ok {
+			f.mu.Unlock()
+			http.Error(w, "not found", http.StatusNotFound)
+			return true
+		}
+		status := plan.LockingStatus
+		if status == "" {
+			status = lockingStatusClose
+		}
+		if status != lockingStatusDeprecated {
+			f.mu.Unlock()
+			http.Error(w,
+				`{"errorMessage":"'lockingStatus' `+status+` prevents product plan from being deleted."}`,
+				http.StatusBadRequest)
+			return true
+		}
 		delete(f.productPlans, id)
 		f.mu.Unlock()
 		w.WriteHeader(http.StatusNoContent)

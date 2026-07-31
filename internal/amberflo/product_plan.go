@@ -311,13 +311,46 @@ func (c *client) EnsureProductPlan(ctx context.Context, desired DesiredProductPl
 	return c.putProductPlan(ctx, http.MethodPost, want)
 }
 
-// DeleteProductPlan removes a product plan by id. 404 is success.
+// DeleteProductPlan removes a product plan by id. Plans are created with
+// lockingStatus close_to_changes; Amberflo rejects DELETE until the plan
+// is deprecated, so we walk lockingStatus → deprecated first (mirrors
+// DeleteMeter). 404 at any step is success.
 func (c *client) DeleteProductPlan(ctx context.Context, id string) error {
 	if id == "" {
 		return &PermanentError{Err: errors.New("product plan id is required")}
 	}
+
+	existing, err := c.GetProductPlan(ctx, id)
+	if err != nil {
+		if errors.Is(err, ErrProductPlanNotFound) {
+			return nil
+		}
+		return err
+	}
+
+	var wire wireProductPlan
+	if len(existing.Raw) > 0 {
+		_ = json.Unmarshal(existing.Raw, &wire)
+	}
+	if wire.ID == "" {
+		wire.ID = existing.ID
+	}
+	if wire.ID == "" {
+		wire.ID = id
+	}
+	if wire.LockingStatus != lockingStatusDeprecated {
+		wire.LockingStatus = lockingStatusDeprecated
+		if _, err := c.putProductPlan(ctx, http.MethodPost, wire); err != nil {
+			var perm *PermanentError
+			if errors.As(err, &perm) && perm.StatusCode == http.StatusNotFound {
+				return nil
+			}
+			return err
+		}
+	}
+
 	path := productPlansPath + "/" + url.PathEscape(id)
-	_, _, err := c.doJSON(ctx, http.MethodDelete, path, nil, nil)
+	_, _, err = c.doJSON(ctx, http.MethodDelete, path, nil, nil)
 	if err != nil {
 		var perm *PermanentError
 		if errors.As(err, &perm) && perm.StatusCode == http.StatusNotFound {
@@ -463,10 +496,7 @@ func buildWirePrice(rates []DesiredPlanRate) (any, error) {
 	dims := make([]wireDimensionPrice, 0, len(rates))
 	for _, r := range rates {
 		if r.Match == nil {
-			// Default catch-all: Amberflo DimensionMatrixNode drops unmatched
-			// usage, so we skip encoding an unmatched default here. Callers
-			// that need a default should emit an explicit Match.
-			continue
+			return nil, errors.New("unmatched rate alongside Match filters is not supported by Amberflo DimensionMatrixNode; encode an explicit Match for every rate (including the default)")
 		}
 		if dimKey == "" {
 			dimKey = r.Match.Dimension
