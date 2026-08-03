@@ -110,6 +110,30 @@ type Client interface {
 	// at switchTimeInSeconds (Amberflo evaluates this against invoice
 	// period starts).
 	SchedulePaymentMethodSwitch(ctx context.Context, sw PaymentMethodSwitch) (PaymentMethodSwitch, error)
+
+	// EnsureProductPlan reconciles the desired product plan (and its
+	// product items / item prices / plan fees) against Amberflo.
+	EnsureProductPlan(ctx context.Context, desired DesiredProductPlan) (ProductPlan, error)
+
+	// DeleteProductPlan removes the product plan identified by id.
+	// 404s are tolerated as success so finalizers can complete cleanly.
+	DeleteProductPlan(ctx context.Context, id string) error
+
+	// GetProductPlan fetches a product plan by id. Returns
+	// ErrProductPlanNotFound on 404.
+	GetProductPlan(ctx context.Context, id string) (ProductPlan, error)
+
+	// EnsureCustomerPlan assigns customerID to productPlanId (creating
+	// or updating the Amberflo customer-pricing relation). Idempotent
+	// when the active assignment already matches.
+	EnsureCustomerPlan(ctx context.Context, desired DesiredCustomerPlan) (CustomerPlan, error)
+
+	// CancelCustomerPlan ends the customer's assignment to productPlanID.
+	// Missing assignments are treated as success.
+	CancelCustomerPlan(ctx context.Context, customerID, productPlanID string) error
+
+	// ListCustomerPlans returns customer-pricing assignments for customerID.
+	ListCustomerPlans(ctx context.Context, customerID string) ([]CustomerPlan, error)
 }
 
 // ClientOptions configures a Client. BaseURL and APIKey are the only

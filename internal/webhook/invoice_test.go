@@ -89,6 +89,20 @@ func (s *stubAmberflo) ListPaymentMethodSwitches(context.Context, string) ([]amb
 func (s *stubAmberflo) SchedulePaymentMethodSwitch(_ context.Context, sw amberflo.PaymentMethodSwitch) (amberflo.PaymentMethodSwitch, error) {
 	return sw, nil
 }
+func (s *stubAmberflo) EnsureProductPlan(context.Context, amberflo.DesiredProductPlan) (amberflo.ProductPlan, error) {
+	return amberflo.ProductPlan{}, nil
+}
+func (s *stubAmberflo) DeleteProductPlan(context.Context, string) error { return nil }
+func (s *stubAmberflo) GetProductPlan(context.Context, string) (amberflo.ProductPlan, error) {
+	return amberflo.ProductPlan{}, nil
+}
+func (s *stubAmberflo) EnsureCustomerPlan(context.Context, amberflo.DesiredCustomerPlan) (amberflo.CustomerPlan, error) {
+	return amberflo.CustomerPlan{}, nil
+}
+func (s *stubAmberflo) CancelCustomerPlan(context.Context, string, string) error { return nil }
+func (s *stubAmberflo) ListCustomerPlans(context.Context, string) ([]amberflo.CustomerPlan, error) {
+	return nil, nil
+}
 
 func newWebhookScheme(t *testing.T) *runtime.Scheme {
 	t.Helper()

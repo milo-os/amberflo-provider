@@ -63,6 +63,20 @@ func (s *stubClient) ListPaymentMethodSwitches(ctx context.Context, _ string) ([
 func (s *stubClient) SchedulePaymentMethodSwitch(ctx context.Context, sw PaymentMethodSwitch) (PaymentMethodSwitch, error) {
 	return sw, nil
 }
+func (s *stubClient) EnsureProductPlan(ctx context.Context, _ DesiredProductPlan) (ProductPlan, error) {
+	return ProductPlan{}, nil
+}
+func (s *stubClient) DeleteProductPlan(ctx context.Context, _ string) error { return nil }
+func (s *stubClient) GetProductPlan(ctx context.Context, _ string) (ProductPlan, error) {
+	return ProductPlan{}, nil
+}
+func (s *stubClient) EnsureCustomerPlan(ctx context.Context, _ DesiredCustomerPlan) (CustomerPlan, error) {
+	return CustomerPlan{}, nil
+}
+func (s *stubClient) CancelCustomerPlan(ctx context.Context, _, _ string) error { return nil }
+func (s *stubClient) ListCustomerPlans(ctx context.Context, _ string) ([]CustomerPlan, error) {
+	return nil, nil
+}
 
 func TestInstrumentedClient_DelegatesAndInstruments(t *testing.T) {
 	stub := &stubClient{}

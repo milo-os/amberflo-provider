@@ -236,6 +236,22 @@ func main() {
 		os.Exit(1)
 	}
 
+	if err = (&controller.OfferReconciler{
+		Client:         mgr.GetClient(),
+		AmberfloClient: amberfloClient,
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "Offer")
+		os.Exit(1)
+	}
+
+	if err = (&controller.BillingEntitlementReconciler{
+		Client:         mgr.GetClient(),
+		AmberfloClient: amberfloClient,
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "BillingEntitlement")
+		os.Exit(1)
+	}
+
 	if err = controller.AddIndexers(ctx, mgr.GetFieldIndexer()); err != nil {
 		setupLog.Error(err, "unable to add indexers")
 		os.Exit(1)

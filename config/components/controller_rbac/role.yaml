@@ -24,7 +24,9 @@ rules:
   - billing.miloapis.com
   resources:
   - billingaccounts
+  - billingentitlements
   - meterdefinitions
+  - offers
   verbs:
   - get
   - list
@@ -35,7 +37,9 @@ rules:
   - billing.miloapis.com
   resources:
   - billingaccounts/finalizers
+  - billingentitlements/finalizers
   - meterdefinitions/finalizers
+  - offers/finalizers
   verbs:
   - update
 - apiGroups:
