@@ -385,8 +385,13 @@ func (r *BillingAccountReconciler) reconcileDelete(
 // removeFinalizer drops the customer-link finalizer via Server-Side
 // Apply: re-apply with an empty finalizers list under our field owner.
 // The apiserver drops our claim on the entry while leaving other
-// managers' finalizers alone, and the surrounding spec is untouched —
-// see the comment on the Add path above.
+// managers' finalizers alone, and the surrounding spec is untouched
+// (see the comment on the Add path above).
+//
+// When the parent namespace is Terminating, Apply is rejected as Forbidden
+// ("unable to create new content ... because it is being terminated").
+// Fall back to Update, matching Offer/BillingEntitlement, so the finalizer
+// can clear and the namespace can finish draining.
 func (r *BillingAccountReconciler) removeFinalizer(
 	ctx context.Context,
 	account *billingv1alpha1.BillingAccount,
@@ -397,6 +402,13 @@ func (r *BillingAccountReconciler) removeFinalizer(
 		),
 		client.FieldOwner(customerLinkFieldOwner),
 	); err != nil {
+		if apierrors.IsForbidden(err) {
+			controllerutil.RemoveFinalizer(account, CustomerLinkFinalizer)
+			if updateErr := r.Update(ctx, account); updateErr != nil {
+				return fmt.Errorf("remove finalizer (update fallback): %w", updateErr)
+			}
+			return nil
+		}
 		return fmt.Errorf("remove finalizer: %w", err)
 	}
 	return nil
