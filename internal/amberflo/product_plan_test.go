@@ -17,6 +17,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strings"
 	"testing"
 )
 
@@ -166,6 +167,9 @@ func TestEnsureProductPlan_UnmatchedWithMatchRejected(t *testing.T) {
 	}
 	if !IsPermanent(err) {
 		t.Fatalf("want permanent error, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "unmatched catch-all") || !strings.Contains(err.Error(), "other") {
+		t.Fatalf("want catch-all / sentinel guidance in error, got %v", err)
 	}
 }
 
