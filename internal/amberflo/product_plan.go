@@ -496,7 +496,10 @@ func buildWirePrice(rates []DesiredPlanRate) (any, error) {
 	dims := make([]wireDimensionPrice, 0, len(rates))
 	for _, r := range rates {
 		if r.Match == nil {
-			return nil, errors.New("unmatched rate alongside Match filters is not supported by Amberflo DimensionMatrixNode; encode an explicit Match for every rate (including the default)")
+			// Milo allows an unmatched catch-all beside matched rates, but
+			// Amberflo DimensionMatrixNode has no default bucket. Authors
+			// must price a sentinel value the meter emits (e.g. "other").
+			return nil, errors.New("amberflo cannot sync an unmatched catch-all beside matched rates; price an explicit Match for every rate (use a sentinel value such as \"other\" for fallbacks)")
 		}
 		if dimKey == "" {
 			dimKey = r.Match.Dimension
