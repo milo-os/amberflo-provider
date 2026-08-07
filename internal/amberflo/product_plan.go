@@ -499,7 +499,7 @@ func buildWirePrice(rates []DesiredPlanRate) (any, error) {
 			// Milo allows an unmatched catch-all beside matched rates, but
 			// Amberflo DimensionMatrixNode has no default bucket. Authors
 			// must price a sentinel value the meter emits (e.g. "other").
-			return nil, errors.New("Amberflo cannot sync an unmatched catch-all beside matched rates; price an explicit Match for every rate (use a sentinel value such as \"other\" for fallbacks)")
+			return nil, errors.New("amberflo cannot sync an unmatched catch-all beside matched rates; price an explicit Match for every rate (use a sentinel value such as \"other\" for fallbacks)")
 		}
 		if dimKey == "" {
 			dimKey = r.Match.Dimension
