@@ -20,6 +20,7 @@ spec:
             } > 0
           for: 5m
           labels:
+            expected_no_match: "true"
             severity: critical
             namespace: amberflo-provider-system
             service: amberflo-provider
