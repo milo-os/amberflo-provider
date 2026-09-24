@@ -23,7 +23,7 @@ spec:
             expected_no_match: "true"
             severity: critical
             namespace: amberflo-provider-system
-            service: amberflo-provider
+            service: billing
           annotations:
             summary: "Pod {{ $labels.pod }} is crash-looping"
             description: |
@@ -43,7 +43,7 @@ spec:
           labels:
             severity: critical
             namespace: amberflo-provider-system
-            service: amberflo-provider
+            service: billing
           annotations:
             summary: "Deployment {{ $labels.deployment }} has unavailable replicas"
             description: |
@@ -62,7 +62,7 @@ spec:
           labels:
             severity: warning
             namespace: amberflo-provider-system
-            service: amberflo-provider
+            service: billing
           annotations:
             summary: "Submission consumer pipeline has stalled"
             description: |
@@ -90,7 +90,7 @@ spec:
           labels:
             severity: warning
             namespace: amberflo-provider-system
-            service: amberflo-provider
+            service: billing
           annotations:
             summary: "Submission consumer error rate above 10%"
             description: |
