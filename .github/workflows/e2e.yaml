@@ -19,7 +19,7 @@ jobs:
         with:
           version: 3.x
           repo-token: ${{ secrets.GITHUB_TOKEN }}
-      - uses: datum-cloud/test-infra/.github/actions/kind-bootstrap@v0.6.4
+      - uses: datum-cloud/test-infra/.github/actions/kind-bootstrap@v0.7.1
         with:
           cluster_name: test-infra
       - uses: kyverno/action-install-chainsaw@v0.2.15
