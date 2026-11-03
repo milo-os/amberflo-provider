@@ -22,7 +22,7 @@ jobs:
       - uses: datum-cloud/test-infra/.github/actions/kind-bootstrap@v0.6.4
         with:
           cluster_name: test-infra
-      - uses: kyverno/action-install-chainsaw@v0.2.12
+      - uses: kyverno/action-install-chainsaw@v0.2.15
       - name: Install dependencies (billing + sandbox credentials)
         # Requires an AMBERFLO_API_KEY secret populated with a SANDBOX
         # key; CI cannot run real e2e without one.
