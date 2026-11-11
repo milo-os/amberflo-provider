@@ -2,7 +2,7 @@ module go.miloapis.com/amberflo-provider
 
 go 1.27.0
 
-toolchain go1.27.3
+toolchain go1.27.4
 
 require (
 	github.com/cloudevents/sdk-go/v2 v2.16.2
