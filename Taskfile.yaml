@@ -11,6 +11,7 @@ vars:
   IMG: '{{.IMG_NAME}}:{{.IMG_TAG}}'
   CONTROLLER_TOOLS_VERSION: 'v0.17.3'
   DEFAULTER_GEN_VERSION: 'v0.32.3'
+  # renovate: datasource=github-releases depName=golangci/golangci-lint
   GOLANGCI_LINT_VERSION: 'v2.15.0'
 
 includes:
