@@ -7,7 +7,9 @@ on:
 
 jobs:
   validate-kustomize:
-    uses: datum-cloud/actions/.github/workflows/validate-kustomize.yaml@v1.28.0
+    uses: datum-cloud/actions/.github/workflows/validate-kustomize.yaml@v1.31.0
+    with:
+      runner: ${{ vars.MILO_LINUX_RUNNER || 'ubuntu-latest' }}
 
   publish-container-image:
     needs:
